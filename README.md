@@ -8,7 +8,7 @@ A cross-platform hub optimized for seamless, ultra-fast content discovery, resou
 
 If you are looking to test or deploy the application instantly without compiling the source code locally, grab the production-ready binary below:
 
-[![Download APK]([https://img.shields.io/badge/Download-Application_APK-005c4b?style=for-the-badge&logo=android&logoColor=white)](android/app/build/outputs/apk/release/app-release.apk](https://github.com/Amperetron/ShareHub_App/releases/download/v1.0.0-beta.1/onspace-app.apk))
+[![Download APK](https://img.shields.io/badge/Download-Application_APK-005c4b?style=for-the-badge&logo=android&logoColor=white)](https://github.com/Amperetron/ShareHub_App/releases/download/v1.0.0-beta.1/onspace-app.apk)
 
 Tip: Alternatively, check out the Releases tab on GitHub for versioned history, incremental update changelogs, and target platform architectures.
 
