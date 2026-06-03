@@ -17,7 +17,7 @@ const SignUpScreen = () => {
       }
       router.replace('/(tabs)');
     } catch (error) {
-      Alert.alert('Sign up failed', error instanceof Error ? error.message : 'Please try again.');
+      Alert.alert('Sign up failed', error instanceof Error ? error.message : JSON.stringify(error));
     }
   };
 

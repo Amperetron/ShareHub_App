@@ -52,7 +52,7 @@ export default function ToolShareScreen() {
         if (mounted) setTools(rows);
       })
       .catch((error) => {
-        Alert.alert('Could not load tools', error instanceof Error ? error.message : 'Please try again.');
+        Alert.alert('Could not load tools', JSON.stringify(error));
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -176,7 +176,7 @@ export default function ToolShareScreen() {
           <Text style={styles.backArrow}>←</Text>
         </Pressable>
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>Tool Share</Text>
+          <Text style={styles.headerTitle}>Nabourly</Text>
           <View style={styles.headerAvailablePill}>
             <Text style={styles.headerAvailableText}>{availableCount} available</Text>
           </View>
@@ -282,7 +282,7 @@ export default function ToolShareScreen() {
             >
               <Text style={styles.ecoBannerEmoji}>🌿</Text>
               <Text style={styles.ecoBannerText}>
-                {'Every borrowed tool = one less product manufactured'}
+                {'Every shared item = one less product manufactured'}
               </Text>
             </LinearGradient>
           </View>

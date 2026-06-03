@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {
   Alert,
+  Animated,
   Modal,
   Platform,
   Pressable,
@@ -9,11 +10,16 @@ import {
   Text,
   TextInput,
   View,
+  ActivityIndicator,
 } from 'react-native';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Colors } from '../constants/theme';
-import { createEvent, createRide, createTool } from '../lib/api';
+import { MaterialIcons } from '@expo/vector-icons';
+import { createRide, createTool, createToolRequest, getRouteDistance, calculateCarbonSaved } from '../lib/api';
+import LocationPickerModal from './LocationPickerModal';
 
-type CreateType = 'ride' | 'tool' | 'event';
+type CreateType = 'ride' | 'tool' | 'request';
+type RideStep = 'type' | 'departure' | 'arrival' | 'details';
 
 type Props = {
   visible: boolean;
@@ -22,10 +28,10 @@ type Props = {
   initialType?: CreateType | null;
 };
 
-const CHOICES: { type: CreateType; title: string; desc: string; icon: string }[] = [
-  { type: 'ride', title: 'Create Co-Ride', desc: 'Offer seats on your route.', icon: '🚗' },
-  { type: 'tool', title: 'Lend Item', desc: 'Share a tool or household item.', icon: '🔧' },
-  { type: 'event', title: 'Organize Event', desc: 'Start a local activity.', icon: '🌱' },
+const CHOICES: { type: CreateType; title: string; desc: string; iconName: string }[] = [
+  { type: 'ride', title: 'Create Co-Ride', desc: 'Offer seats on your route.', iconName: 'directions-car' },
+  { type: 'tool', title: 'Lend Nabourly', desc: 'Share a tool or household item.', iconName: 'build' },
+  { type: 'request', title: 'Request Nabourly', desc: 'Ask to borrow a tool or item.', iconName: 'inbox' },
 ];
 
 function toNumber(value: string, fallback = 0) {
@@ -33,26 +39,41 @@ function toNumber(value: string, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function tomorrowMorning() {
+function getDefaultDepartureTime(): string {
   const date = new Date();
-  date.setDate(date.getDate() + 1);
-  date.setHours(8, 30, 0, 0);
+  date.setMinutes(date.getMinutes() + 30);
   return date.toISOString().slice(0, 16);
 }
 
 export default function CreateShareModal({ visible, onClose, onCreated, initialType = null }: Props) {
   const [type, setType] = useState<CreateType | null>(initialType);
   const [saving, setSaving] = useState(false);
+  const [rideStep, setRideStep] = useState<RideStep>('type');
+  const overlayAnim = useRef(new Animated.Value(0)).current;
 
-  const [rideDeparture, setRideDeparture] = useState('');
-  const [rideArrival, setRideArrival] = useState('');
-  const [rideDepartureTime, setRideDepartureTime] = useState(tomorrowMorning());
-  const [rideArrivalTime, setRideArrivalTime] = useState('');
-  const [rideFare, setRideFare] = useState('');
-  const [rideSeats, setRideSeats] = useState('3');
-  const [rideCo2, setRideCo2] = useState('');
+  useEffect(() => {
+    if (visible) {
+      Animated.timing(overlayAnim, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      overlayAnim.setValue(0);
+    }
+  }, [visible, overlayAnim]);
+
+  const [departureLocation, setDepartureLocation] = useState<{ lat: number; lng: number; address: string } | null>(null);
+  const [arrivalLocation, setArrivalLocation] = useState<{ lat: number; lng: number; address: string } | null>(null);
+  const [departureTime, setDepartureTime] = useState(getDefaultDepartureTime());
+  const [arrivalTime, setArrivalTime] = useState('');
+  const [fare, setFare] = useState('');
+  const [seats, setSeats] = useState('3');
+  const [co2Saving, setCo2Saving] = useState('');
   const [vehicleName, setVehicleName] = useState('');
   const [vehicleNumber, setVehicleNumber] = useState('');
+  const [routeDistance, setRouteDistance] = useState<number | null>(null);
+  const [calculatingRoute, setCalculatingRoute] = useState(false);
 
   const [toolName, setToolName] = useState('');
   const [toolBrand, setToolBrand] = useState('');
@@ -61,16 +82,88 @@ export default function CreateShareModal({ visible, onClose, onCreated, initialT
   const [toolDescription, setToolDescription] = useState('');
   const [toolEmoji, setToolEmoji] = useState('');
 
-  const [eventTitle, setEventTitle] = useState('');
-  const [eventDescription, setEventDescription] = useState('');
-  const [eventLocation, setEventLocation] = useState('');
-  const [eventTime, setEventTime] = useState(tomorrowMorning());
+  const [requestName, setRequestName] = useState('');
+  const [requestCategory, setRequestCategory] = useState('Power Tools');
+  const [requestDescription, setRequestDescription] = useState('');
+  const [requestMessage, setRequestMessage] = useState('');
+
+  const [departurePickerVisible, setDeparturePickerVisible] = useState(false);
+  const [arrivalPickerVisible, setArrivalPickerVisible] = useState(false);
 
   const selectedTitle = useMemo(() => CHOICES.find((choice) => choice.type === type)?.title, [type]);
 
-  function resetAndClose() {
+  useEffect(() => {
+    if (visible) {
+      resetState();
+    }
+  }, [visible]);
+
+  function resetState() {
     setType(initialType);
+    setRideStep('type');
+    setDepartureLocation(null);
+    setArrivalLocation(null);
+    setDepartureTime(getDefaultDepartureTime());
+    setArrivalTime('');
+    setFare('');
+    setSeats('3');
+    setCo2Saving('');
+    setVehicleName('');
+    setVehicleNumber('');
+    setRouteDistance(null);
+    setToolName('');
+    setToolBrand('');
+    setToolCategory('Power Tools');
+    setToolCondition('Good');
+    setToolDescription('');
+    setToolEmoji('');
+    setRequestName('');
+    setRequestCategory('Power Tools');
+    setRequestDescription('');
+    setRequestMessage('');
+  }
+
+  function resetAndClose() {
+    resetState();
     onClose();
+  }
+
+  useEffect(() => {
+    if (departureLocation && arrivalLocation) {
+      calculateRoute();
+    }
+  }, [departureLocation, arrivalLocation]);
+
+  async function calculateRoute() {
+    if (!departureLocation || !arrivalLocation) return;
+    setCalculatingRoute(true);
+    try {
+      const distance = await getRouteDistance(
+        { lat: departureLocation.lat, lng: departureLocation.lng },
+        { lat: arrivalLocation.lat, lng: arrivalLocation.lng }
+      );
+      if (distance) {
+        setRouteDistance(distance);
+        const co2 = calculateCarbonSaved(distance);
+        setCo2Saving(co2.toString());
+      }
+    } catch {
+      // Ignore calculation errors
+    } finally {
+      setCalculatingRoute(false);
+    }
+  }
+
+  function handleDepartureSelect(location: { lat: number; lng: number; address: string }) {
+    setDepartureLocation(location);
+    setDeparturePickerVisible(false);
+    setRideStep('arrival');
+  }
+
+  function handleArrivalSelect(location: { lat: number; lng: number; address: string }) {
+    setArrivalLocation(location);
+    setArrivalPickerVisible(false);
+    setRideStep('details');
   }
 
   async function handleSubmit() {
@@ -80,21 +173,25 @@ export default function CreateShareModal({ visible, onClose, onCreated, initialT
       setSaving(true);
 
       if (type === 'ride') {
-        if (!rideDeparture.trim() || !rideArrival.trim() || !rideDepartureTime.trim()) {
-          Alert.alert('Missing ride details', 'Please enter departure, arrival, and departure time.');
+        if (!departureLocation || !arrivalLocation) {
+          Alert.alert('Missing locations', 'Please select both departure and arrival locations.');
           return;
         }
 
         await createRide({
-          departure: rideDeparture.trim(),
-          arrival: rideArrival.trim(),
-          departureTime: rideDepartureTime,
-          arrivalTime: rideArrivalTime.trim() || undefined,
-          fare: toNumber(rideFare),
-          seatsTotal: toNumber(rideSeats, 1),
-          co2Saving: toNumber(rideCo2),
+          departure: departureLocation.address,
+          arrival: arrivalLocation.address,
+          departureTime: departureTime,
+          arrivalTime: arrivalTime.trim() || undefined,
+          fare: toNumber(fare),
+          seatsTotal: toNumber(seats, 1),
+          co2Saving: toNumber(co2Saving),
           vehicleName: vehicleName.trim() || undefined,
           vehicleNumber: vehicleNumber.trim() || undefined,
+          departureLat: departureLocation.lat,
+          departureLng: departureLocation.lng,
+          arrivalLat: arrivalLocation.lat,
+          arrivalLng: arrivalLocation.lng,
         });
       }
 
@@ -114,143 +211,563 @@ export default function CreateShareModal({ visible, onClose, onCreated, initialT
         });
       }
 
-      if (type === 'event') {
-        if (!eventTitle.trim()) {
-          Alert.alert('Missing event title', 'Please enter a title for the event.');
+      if (type === 'request') {
+        if (!requestName.trim() || !requestCategory.trim()) {
+          Alert.alert('Missing details', 'Please enter the item name and category.');
           return;
         }
 
-        await createEvent({
-          title: eventTitle.trim(),
-          description: eventDescription.trim() || undefined,
-          location: eventLocation.trim() || undefined,
-          eventTime: eventTime.trim() || undefined,
+        await createTool({
+          name: requestName.trim(),
+          category: requestCategory.trim(),
+          description: requestDescription.trim() || undefined,
+          emoji: '📩',
+          type: 'request',
         });
       }
 
-      Alert.alert('Saved', `${selectedTitle} has been added.`);
+      Alert.alert('Saved', type === 'request' ? 'Your request has been posted. Lenders will be notified.' : `${selectedTitle} has been added.`);
       onCreated?.();
       resetAndClose();
     } catch (error) {
-      Alert.alert('Could not save', error instanceof Error ? error.message : 'Please try again.');
+      Alert.alert('Could not save', JSON.stringify(error));
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={resetAndClose}>
-      <View style={styles.backdrop}>
-        <View style={styles.sheet}>
-          <View style={styles.header}>
-            <View>
-              <Text style={styles.title}>{type ? selectedTitle : 'What do you want to add?'}</Text>
-              <Text style={styles.subtitle}>Create something for your neighborhood.</Text>
+    <>
+      <Modal visible={visible} transparent animationType="slide" onRequestClose={resetAndClose}>
+        <Animated.View style={[styles.backdrop, { opacity: overlayAnim }]}>
+          <Pressable style={styles.backdropPress} onPress={resetAndClose} />
+          <View style={styles.sheet}>
+            <View style={styles.header}>
+              <View>
+                <Text style={styles.title}>
+                  {type === 'ride' && rideStep !== 'type'
+                    ? getStepTitle(rideStep)
+                    : type
+                    ? selectedTitle
+                    : 'What do you want to add?'}
+                </Text>
+                <Text style={styles.subtitle}>
+                  {type === 'ride' && rideStep !== 'type'
+                    ? getStepSubtitle(rideStep)
+                    : 'Create something for your neighborhood.'}
+                </Text>
+              </View>
+              <Pressable style={styles.closeBtn} onPress={resetAndClose}>
+                <Text style={styles.closeText}>×</Text>
+              </Pressable>
             </View>
-            <Pressable style={styles.closeBtn} onPress={resetAndClose}>
-              <Text style={styles.closeText}>×</Text>
-            </Pressable>
-          </View>
 
-          {!type ? (
-            <View style={styles.choiceList}>
-              {CHOICES.map((choice) => (
-                <Pressable key={choice.type} style={styles.choice} onPress={() => setType(choice.type)}>
-                  <Text style={styles.choiceIcon}>{choice.icon}</Text>
-                  <View style={styles.choiceText}>
-                    <Text style={styles.choiceTitle}>{choice.title}</Text>
-                    <Text style={styles.choiceDesc}>{choice.desc}</Text>
-                  </View>
-                  <Text style={styles.choiceArrow}>›</Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : (
-            <>
-              <ScrollView
-                style={styles.formScroll}
-                contentContainerStyle={styles.form}
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={false}
-              >
-                {type === 'ride' ? (
-                  <>
-                    <Field label="Departure" value={rideDeparture} onChangeText={setRideDeparture} placeholder="Starting point" />
-                    <Field label="Arrival" value={rideArrival} onChangeText={setRideArrival} placeholder="Destination" />
-                    <Field label="Departure time" value={rideDepartureTime} onChangeText={setRideDepartureTime} placeholder="2026-05-01T08:30" />
-                    <Field label="Arrival time" value={rideArrivalTime} onChangeText={setRideArrivalTime} placeholder="2026-05-01T09:30" />
-                    <Field label="Fare" value={rideFare} onChangeText={setRideFare} placeholder="120" keyboardType="numeric" />
-                    <Field label="Seats" value={rideSeats} onChangeText={setRideSeats} placeholder="3" keyboardType="numeric" />
-                    <Field label="CO2 saving kg" value={rideCo2} onChangeText={setRideCo2} placeholder="2.4" keyboardType="numeric" />
-                    <Field label="Vehicle" value={vehicleName} onChangeText={setVehicleName} placeholder="Vehicle model and color" />
-                    <Field label="Vehicle number" value={vehicleNumber} onChangeText={setVehicleNumber} placeholder="Vehicle number" />
-                  </>
-                ) : null}
+            {!type ? (
+              <View style={styles.choiceList}>
+                {CHOICES.map((choice) => (
+                  <Pressable key={choice.type} style={styles.choice} onPress={() => {
+                    setType(choice.type);
+                    if (choice.type === 'ride') {
+                      setRideStep('departure');
+                      setDeparturePickerVisible(true);
+                    }
+                  }}>
+                    <View style={styles.choiceIconWrap}>
+                      <MaterialIcons name={choice.iconName as any} size={24} color={Colors.primary} />
+                    </View>
+                    <View style={styles.choiceText}>
+                      <Text style={styles.choiceTitle}>{choice.title}</Text>
+                      <Text style={styles.choiceDesc}>{choice.desc}</Text>
+                    </View>
+                    <Text style={styles.choiceArrow}>›</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : type === 'ride' ? (
+              <RideForm
+                step={rideStep}
+                departure={departureLocation}
+                arrival={arrivalLocation}
+                departureTime={departureTime}
+                arrivalTime={arrivalTime}
+                fare={fare}
+                seats={seats}
+                co2Saving={co2Saving}
+                vehicleName={vehicleName}
+                vehicleNumber={vehicleNumber}
+                routeDistance={routeDistance}
+                calculatingRoute={calculatingRoute}
+                onDeparturePress={() => setDeparturePickerVisible(true)}
+                onArrivalPress={() => setArrivalPickerVisible(true)}
+                onDepartureTimeChange={setDepartureTime}
+                onArrivalTimeChange={setArrivalTime}
+                onFareChange={setFare}
+                onSeatsChange={setSeats}
+                onCo2Change={setCo2Saving}
+                onVehicleNameChange={setVehicleName}
+                onVehicleNumberChange={setVehicleNumber}
+                onBack={() => {
+                  if (rideStep === 'arrival') setRideStep('departure');
+                  else if (rideStep === 'details') setRideStep('arrival');
+                  else setType(null);
+                }}
+                onNext={() => {
+                  if (rideStep === 'departure') setRideStep('arrival');
+                  else if (rideStep === 'arrival') setRideStep('details');
+                }}
+              />
+            ) : type === 'tool' ? (
+              <ToolForm
+                name={toolName}
+                brand={toolBrand}
+                category={toolCategory}
+                condition={toolCondition}
+                description={toolDescription}
+                emoji={toolEmoji}
+                onNameChange={setToolName}
+                onBrandChange={setToolBrand}
+                onCategoryChange={setToolCategory}
+                onConditionChange={setToolCondition}
+                onDescriptionChange={setToolDescription}
+                onEmojiChange={setToolEmoji}
+              />
+            ) : (
+              <ToolRequestForm
+                name={requestName}
+                category={requestCategory}
+                description={requestDescription}
+                message={requestMessage}
+                onNameChange={setRequestName}
+                onCategoryChange={setRequestCategory}
+                onDescriptionChange={setRequestDescription}
+                onMessageChange={setRequestMessage}
+              />
+            )}
 
-                {type === 'tool' ? (
-                  <>
-                    <Field label="Item name" value={toolName} onChangeText={setToolName} placeholder="Power Drill" />
-                    <Field label="Brand" value={toolBrand} onChangeText={setToolBrand} placeholder="Bosch GSB 500" />
-                    <Field label="Category" value={toolCategory} onChangeText={setToolCategory} placeholder="Power Tools" />
-                    <Field label="Condition" value={toolCondition} onChangeText={setToolCondition} placeholder="Good" />
-                    <Field label="Emoji" value={toolEmoji} onChangeText={setToolEmoji} placeholder="🔧" />
-                    <Field label="Description" value={toolDescription} onChangeText={setToolDescription} placeholder="Useful for wall mounting and DIY." multiline />
-                  </>
-                ) : null}
-
-                {type === 'event' ? (
-                  <>
-                    <Field label="Event title" value={eventTitle} onChangeText={setEventTitle} placeholder="Event title" />
-                    <Field label="Location" value={eventLocation} onChangeText={setEventLocation} placeholder="Event location" />
-                    <Field label="Event time" value={eventTime} onChangeText={setEventTime} placeholder="2026-05-01T08:30" />
-                    <Field label="Description" value={eventDescription} onChangeText={setEventDescription} placeholder="Bring gloves and water bottles." multiline />
-                  </>
-                ) : null}
-              </ScrollView>
-
+            {(type === 'tool' || type === 'request' || (type === 'ride' && rideStep === 'details')) && (
               <View style={styles.footer}>
-                <Pressable style={styles.secondaryBtn} onPress={() => setType(null)}>
+                <Pressable
+                  style={styles.secondaryBtn}
+                  onPress={() => type === 'ride' ? setRideStep('arrival') : setType(null)}
+                >
                   <Text style={styles.secondaryText}>Back</Text>
                 </Pressable>
-                <Pressable style={[styles.primaryBtn, saving && { opacity: 0.65 }]} onPress={handleSubmit} disabled={saving}>
-                  <Text style={styles.primaryText}>{saving ? 'Saving...' : 'Save'}</Text>
+                <Pressable
+                  style={[styles.primaryBtn, saving && { opacity: 0.65 }]}
+                  onPress={handleSubmit}
+                  disabled={saving}
+                >
+                  <Text style={styles.primaryText}>{saving ? 'Saving...' : type === 'request' ? 'Send Request' : 'Save'}</Text>
                 </Pressable>
               </View>
-            </>
-          )}
-        </View>
-      </View>
-    </Modal>
+            )}
+          </View>
+        </Animated.View>
+      </Modal>
+
+      <LocationPickerModal
+        visible={departurePickerVisible}
+        onClose={() => {
+          setDeparturePickerVisible(false);
+          if (!departureLocation) {
+            setType(null);
+          }
+        }}
+        onSelect={handleDepartureSelect}
+        title="Select Start Location"
+      />
+
+      <LocationPickerModal
+        visible={arrivalPickerVisible}
+        onClose={() => {
+          setArrivalPickerVisible(false);
+          if (!arrivalLocation) {
+            setRideStep('departure');
+          }
+        }}
+        onSelect={handleArrivalSelect}
+        title="Select End Location"
+      />
+    </>
   );
 }
 
-function Field({
+function getStepTitle(step: RideStep): string {
+  switch (step) {
+    case 'departure': return 'Start Location';
+    case 'arrival': return 'End Location';
+    case 'details': return 'Ride Details';
+    default: return 'Create Co-Ride';
+  }
+}
+
+function getStepSubtitle(step: RideStep): string {
+  switch (step) {
+    case 'departure': return 'Tap on the map to select your starting point';
+    case 'arrival': return 'Tap on the map to select your destination';
+    case 'details': return 'Set departure time and other details';
+    default: return '';
+  }
+}
+
+interface RideFormProps {
+  step: RideStep;
+  departure: { lat: number; lng: number; address: string } | null;
+  arrival: { lat: number; lng: number; address: string } | null;
+  departureTime: string;
+  arrivalTime: string;
+  fare: string;
+  seats: string;
+  co2Saving: string;
+  vehicleName: string;
+  vehicleNumber: string;
+  routeDistance: number | null;
+  calculatingRoute: boolean;
+  onDeparturePress: () => void;
+  onArrivalPress: () => void;
+  onDepartureTimeChange: (value: string) => void;
+  onArrivalTimeChange: (value: string) => void;
+  onFareChange: (value: string) => void;
+  onSeatsChange: (value: string) => void;
+  onCo2Change: (value: string) => void;
+  onVehicleNameChange: (value: string) => void;
+  onVehicleNumberChange: (value: string) => void;
+  onBack: () => void;
+  onNext: () => void;
+}
+
+function RideForm({
+  step,
+  departure,
+  arrival,
+  departureTime,
+  arrivalTime,
+  fare,
+  seats,
+  co2Saving,
+  vehicleName,
+  vehicleNumber,
+  routeDistance,
+  calculatingRoute,
+  onDeparturePress,
+  onArrivalPress,
+  onDepartureTimeChange,
+  onArrivalTimeChange,
+  onFareChange,
+  onSeatsChange,
+  onCo2Change,
+  onVehicleNameChange,
+  onVehicleNumberChange,
+  onBack,
+  onNext,
+}: RideFormProps) {
+  if (step === 'departure') {
+    return (
+      <View style={styles.formContainer}>
+        {departure ? (
+          <View style={styles.locationCard}>
+            <View style={styles.locationDot} />
+            <View style={styles.locationInfo}>
+              <Text style={styles.locationLabel}>Start</Text>
+              <Text style={styles.locationAddress} numberOfLines={2}>{departure.address}</Text>
+            </View>
+            <Pressable style={styles.changeBtn} onPress={onDeparturePress}>
+              <Text style={styles.changeBtnText}>Change</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable style={styles.locationPickerBtn} onPress={onDeparturePress}>
+            <Text style={styles.locationPickerIcon}>📍</Text>
+            <Text style={styles.locationPickerText}>Tap to select start location</Text>
+          </Pressable>
+        )}
+      </View>
+    );
+  }
+
+  if (step === 'arrival') {
+    return (
+      <ScrollView style={styles.formContainer} contentContainerStyle={styles.formContent}>
+        {departure && (
+          <View style={styles.locationCard}>
+            <View style={[styles.locationDot, { backgroundColor: Colors.primary }]} />
+            <View style={styles.locationInfo}>
+              <Text style={styles.locationLabel}>From</Text>
+              <Text style={styles.locationAddress} numberOfLines={1}>{departure.address}</Text>
+            </View>
+          </View>
+        )}
+
+        <View style={styles.verticalConnector} />
+
+        {arrival ? (
+          <View style={styles.locationCard}>
+            <View style={[styles.locationDot, { backgroundColor: Colors.blueMid }]} />
+            <View style={styles.locationInfo}>
+              <Text style={styles.locationLabel}>To</Text>
+              <Text style={styles.locationAddress} numberOfLines={2}>{arrival.address}</Text>
+            </View>
+            <Pressable style={styles.changeBtn} onPress={onArrivalPress}>
+              <Text style={styles.changeBtnText}>Change</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable style={styles.locationPickerBtn} onPress={onArrivalPress}>
+            <Text style={styles.locationPickerIcon}>📍</Text>
+            <Text style={styles.locationPickerText}>Tap to select destination</Text>
+          </Pressable>
+        )}
+
+        {routeDistance && (
+          <View style={styles.routeInfo}>
+            <Text style={styles.routeInfoText}>
+              {routeDistance.toFixed(1)} km • ~{Math.round(routeDistance / 30 * 60)} min drive
+            </Text>
+          </View>
+        )}
+
+        {calculatingRoute && (
+          <View style={styles.routeInfo}>
+            <ActivityIndicator size="small" color={Colors.primary} />
+            <Text style={styles.routeInfoText}>Calculating route...</Text>
+          </View>
+        )}
+
+        <View style={styles.btnRow}>
+          <Pressable style={styles.secondaryBtn} onPress={onBack}>
+            <Text style={styles.secondaryText}>Back</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.primaryBtn, !arrival && styles.primaryBtnDisabled]}
+            onPress={onNext}
+            disabled={!arrival}
+          >
+            <Text style={styles.primaryText}>Next</Text>
+          </Pressable>
+        </View>
+      </ScrollView>
+    );
+  }
+
+  // step === 'details'
+  return (
+    <ScrollView style={styles.formContainer} contentContainerStyle={styles.formContent}>
+      {departure && (
+        <View style={styles.locationSummary}>
+          <View style={styles.locationSummaryItem}>
+            <View style={[styles.locationDot, { backgroundColor: Colors.primary }]} />
+            <Text style={styles.locationSummaryText} numberOfLines={1}>{departure.address}</Text>
+          </View>
+          {routeDistance && (
+            <Text style={styles.locationSummaryDistance}>{routeDistance.toFixed(1)} km</Text>
+          )}
+          <View style={styles.locationSummaryItem}>
+            <View style={[styles.locationDot, { backgroundColor: Colors.blueMid }]} />
+            <Text style={styles.locationSummaryText} numberOfLines={1}>{arrival?.address}</Text>
+          </View>
+        </View>
+      )}
+
+      <NativeDateTimePicker
+        label="Departure time"
+        value={departureTime}
+        onChange={onDepartureTimeChange}
+      />
+      <NativeDateTimePicker
+        label="Arrival time (optional)"
+        value={arrivalTime}
+        onChange={onArrivalTimeChange}
+        optional
+      />
+
+      <Field label="Fare (₹)" value={fare} onChangeText={onFareChange} placeholder="0" keyboardType="numeric" />
+      <Field label="Seats available" value={seats} onChangeText={onSeatsChange} placeholder="3" keyboardType="numeric" />
+      <Field label="Vehicle" value={vehicleName} onChangeText={onVehicleNameChange} placeholder="Model and color" />
+      <Field label="Vehicle number" value={vehicleNumber} onChangeText={onVehicleNumberChange} placeholder="KA 01 AB 1234" />
+    </ScrollView>
+  );
+}
+
+interface ToolFormProps {
+  name: string;
+  brand: string;
+  category: string;
+  condition: string;
+  description: string;
+  emoji: string;
+  onNameChange: (value: string) => void;
+  onBrandChange: (value: string) => void;
+  onCategoryChange: (value: string) => void;
+  onConditionChange: (value: string) => void;
+  onDescriptionChange: (value: string) => void;
+  onEmojiChange: (value: string) => void;
+}
+
+function ToolForm({
+  name,
+  brand,
+  category,
+  condition,
+  description,
+  emoji,
+  onNameChange,
+  onBrandChange,
+  onCategoryChange,
+  onConditionChange,
+  onDescriptionChange,
+  onEmojiChange,
+}: ToolFormProps) {
+  return (
+    <ScrollView style={styles.formContainer} contentContainerStyle={styles.formContent}>
+      <Field label="Item name" value={name} onChangeText={onNameChange} placeholder="Power Drill" />
+      <Field label="Brand" value={brand} onChangeText={onBrandChange} placeholder="Bosch GSB 500" />
+      <Field label="Category" value={category} onChangeText={onCategoryChange} placeholder="Power Tools" />
+      <Field label="Condition" value={condition} onChangeText={onConditionChange} placeholder="Good" />
+      <Field label="Emoji" value={emoji} onChangeText={onEmojiChange} placeholder="🔧" />
+      <Field label="Description" value={description} onChangeText={onDescriptionChange} placeholder="Useful for wall mounting and DIY." multiline />
+    </ScrollView>
+  );
+}
+
+interface ToolRequestFormProps {
+  name: string;
+  category: string;
+  description: string;
+  message: string;
+  onNameChange: (value: string) => void;
+  onCategoryChange: (value: string) => void;
+  onDescriptionChange: (value: string) => void;
+  onMessageChange: (value: string) => void;
+}
+
+function ToolRequestForm({
+  name,
+  category,
+  description,
+  message,
+  onNameChange,
+  onCategoryChange,
+  onDescriptionChange,
+  onMessageChange,
+}: ToolRequestFormProps) {
+  return (
+    <ScrollView style={styles.formContainer} contentContainerStyle={styles.formContent}>
+      <View style={{ backgroundColor: Colors.accentBg, borderRadius: 12, padding: 14 }}>
+        <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.primary }}>
+          Your request will be visible to lenders who have matching items.
+        </Text>
+      </View>
+      <Field label="What do you need?" value={name} onChangeText={onNameChange} placeholder="Power Drill, Garden Hose, etc." />
+      <Field label="Category" value={category} onChangeText={onCategoryChange} placeholder="Power Tools" />
+      <Field label="Description (optional)" value={description} onChangeText={onDescriptionChange} placeholder="What will you use it for?" multiline />
+      <Field label="Message to lenders (optional)" value={message} onChangeText={onMessageChange} placeholder="Hi, I need this for a weekend project..." multiline />
+    </ScrollView>
+  );
+}
+
+function NativeDateTimePicker({
   label,
   value,
-  onChangeText,
-  placeholder,
-  multiline,
-  keyboardType,
+  onChange,
+  optional,
 }: {
   label: string;
   value: string;
-  onChangeText: (value: string) => void;
+  onChange: (iso: string) => void;
+  optional?: boolean;
+}) {
+  const [showDate, setShowDate] = useState(false);
+  const [showTime, setShowTime] = useState(false);
+  const [tempDate, setTempDate] = useState<Date>(() => {
+    if (value) {
+      const d = new Date(value);
+      return isNaN(d.getTime()) ? new Date() : d;
+    }
+    return new Date();
+  });
+
+  const displayValue = value
+    ? new Date(value).toLocaleString([], {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : 'Tap to set';
+
+  function handleDateChange(_: DateTimePickerEvent, selectedDate?: Date) {
+    if (Platform.OS === 'android') setShowDate(false);
+    if (selectedDate) {
+      const updated = new Date(tempDate);
+      updated.setFullYear(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
+      setTempDate(updated);
+      if (Platform.OS === 'android') {
+        setShowTime(true);
+      }
+    }
+  }
+
+  function handleTimeChange(_: DateTimePickerEvent, selectedTime?: Date) {
+    if (Platform.OS === 'android') setShowTime(false);
+    if (selectedTime) {
+      const updated = new Date(tempDate);
+      updated.setHours(selectedTime.getHours(), selectedTime.getMinutes(), 0, 0);
+      setTempDate(updated);
+      onChange(updated.toISOString().slice(0, 16));
+    }
+  }
+
+  return (
+    <View style={styles.field}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <Pressable style={styles.datePickerBtn} onPress={() => setShowDate(true)}>
+        <Text style={[styles.datePickerText, !value && { color: '#9ca3af' }]}>
+          {displayValue}
+        </Text>
+        <MaterialIcons name="calendar-today" size={18} color={Colors.muted} />
+      </Pressable>
+
+      {showDate && (
+        <DateTimePicker
+          value={tempDate}
+          mode="date"
+          display="calendar"
+          minimumDate={new Date()}
+          onChange={handleDateChange}
+        />
+      )}
+
+      {showTime && (
+        <DateTimePicker
+          value={tempDate}
+          mode="time"
+          display="clock"
+          onChange={handleTimeChange}
+        />
+      )}
+    </View>
+  );
+}
+
+function Field({ label, value, onChangeText, placeholder, keyboardType, multiline }: {
+  label: string;
+  value: string;
+  onChangeText: (v: string) => void;
   placeholder: string;
-  multiline?: boolean;
   keyboardType?: 'default' | 'numeric';
+  multiline?: boolean;
 }) {
   return (
     <View style={styles.field}>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={styles.fieldLabel}>{label}</Text>
       <TextInput
-        style={[styles.input, multiline && styles.multiline]}
+        style={[styles.input, multiline && styles.inputMultiline]}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor="#8b9488"
-        multiline={multiline}
+        placeholderTextColor="#9ca3af"
         keyboardType={keyboardType}
-        textAlignVertical={multiline ? 'top' : 'center'}
+        multiline={multiline}
       />
     </View>
   );
@@ -259,139 +776,273 @@ function Field({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'flex-end',
   },
+  backdropPress: {
+    flex: 1,
+  },
   sheet: {
-    maxHeight: '88%',
-    backgroundColor: Colors.surface,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    padding: 20,
-    gap: 18,
+    backgroundColor: Colors.white,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '90%',
+    minHeight: '60%',
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    gap: 16,
+    alignItems: 'flex-start',
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
   },
   title: {
-    fontSize: 22,
-    fontWeight: '800',
+    fontSize: 20,
+    fontWeight: '700',
     color: Colors.dark,
   },
   subtitle: {
-    fontSize: 13,
-    fontWeight: '500',
+    fontSize: 14,
     color: Colors.muted,
     marginTop: 4,
   },
   closeBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: Colors.inputBg,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
   closeText: {
-    fontSize: 24,
-    fontWeight: '600',
+    fontSize: 20,
     color: Colors.dark,
-    marginTop: -2,
+    fontWeight: '300',
   },
   choiceList: {
+    padding: 20,
     gap: 12,
   },
   choice: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    backgroundColor: Colors.white,
-    borderRadius: 18,
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
     padding: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    gap: 14,
   },
-  choiceIcon: {
-    fontSize: 28,
+  choiceIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: Colors.accentBg,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   choiceText: {
     flex: 1,
-    gap: 2,
   },
   choiceTitle: {
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
     color: Colors.dark,
   },
   choiceDesc: {
     fontSize: 13,
-    fontWeight: '500',
     color: Colors.muted,
+    marginTop: 2,
   },
   choiceArrow: {
     fontSize: 24,
-    color: Colors.primary,
-    fontWeight: '700',
+    color: Colors.muted,
   },
-  formScroll: {
-    maxHeight: Platform.OS === 'web' ? 520 : 460,
+  formContainer: {
+    flex: 1,
   },
-  form: {
-    gap: 12,
-    paddingBottom: 4,
+  formContent: {
+    padding: 20,
+    gap: 16,
   },
   field: {
     gap: 6,
   },
-  label: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: Colors.darkMid,
+  fieldLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.dark,
   },
   input: {
-    minHeight: 48,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.white,
+    backgroundColor: Colors.surface,
+    borderRadius: 10,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 12,
     fontSize: 15,
     color: Colors.dark,
   },
-  multiline: {
-    minHeight: 96,
+  inputMultiline: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  datePickerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.surface,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  datePickerText: {
+    fontSize: 15,
+    color: Colors.dark,
+  },
+  datePickerIcon: {
+    fontSize: 18,
   },
   footer: {
     flexDirection: 'row',
     gap: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
   },
   secondaryBtn: {
     flex: 1,
-    borderRadius: 16,
-    paddingVertical: 15,
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    paddingVertical: 14,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.primary,
   },
   secondaryText: {
     fontSize: 15,
-    fontWeight: '800',
-    color: Colors.primary,
+    fontWeight: '600',
+    color: Colors.dark,
   },
   primaryBtn: {
     flex: 1,
-    borderRadius: 16,
-    paddingVertical: 15,
-    alignItems: 'center',
     backgroundColor: Colors.primary,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  primaryBtnDisabled: {
+    backgroundColor: Colors.surface,
   },
   primaryText: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     color: Colors.white,
+  },
+  btnRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  locationCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    padding: 14,
+    gap: 12,
+  },
+  locationDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.dark,
+  },
+  locationInfo: {
+    flex: 1,
+  },
+  locationLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.muted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  locationAddress: {
+    fontSize: 14,
+    color: Colors.dark,
+    marginTop: 2,
+  },
+  changeBtn: {
+    backgroundColor: Colors.accentBg,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  changeBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
+  locationPickerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    padding: 20,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    borderStyle: 'dashed',
+    gap: 8,
+  },
+  locationPickerIcon: {
+    fontSize: 20,
+  },
+  locationPickerText: {
+    fontSize: 14,
+    color: Colors.muted,
+  },
+  verticalConnector: {
+    width: 2,
+    height: 20,
+    backgroundColor: Colors.border,
+    marginLeft: 19,
+  },
+  routeInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.accentBg,
+    borderRadius: 10,
+    padding: 12,
+    gap: 8,
+  },
+  routeInfoText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.primary,
+  },
+  locationSummary: {
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    padding: 14,
+    gap: 8,
+  },
+  locationSummaryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  locationSummaryText: {
+    flex: 1,
+    fontSize: 13,
+    color: Colors.dark,
+  },
+  locationSummaryDistance: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.muted,
+    textAlign: 'center',
   },
 });

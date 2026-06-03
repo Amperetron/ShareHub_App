@@ -118,7 +118,7 @@ export default function ToolRequestScreen() {
         router.back();
       }, 2200);
     } catch (error) {
-      Alert.alert('Request failed', error instanceof Error ? error.message : 'Please try again.');
+      Alert.alert('Request failed', JSON.stringify(error));
     }
   }
 
@@ -137,7 +137,7 @@ export default function ToolRequestScreen() {
           </View>
           <Text style={styles.successTitle}>Request Sent!</Text>
           <Text style={styles.successDesc}>
-            {`Your borrow request for\n`}
+            {`Your request for\n`}
             <Text style={{ fontWeight: '700' }}>{toolName}</Text>
             {` has been sent to ${ownerName}.\nThey typically respond within 2 hours.`}
           </Text>
@@ -156,7 +156,7 @@ export default function ToolRequestScreen() {
         <Pressable style={styles.backBtn} onPress={() => router.back()} hitSlop={8}>
           <Text style={styles.backArrow}>←</Text>
         </Pressable>
-        <Text style={styles.headerTitle}>Request to Borrow</Text>
+        <Text style={styles.headerTitle}>Request Nabourly</Text>
         <View style={styles.headerRight} />
       </View>
 
@@ -339,7 +339,7 @@ export default function ToolRequestScreen() {
           </View>
           <View style={[styles.summaryDivider, { backgroundColor: `${toolAccentColor}22` }]} />
           <Text style={[styles.summaryNote, { color: toolAccentColor }]}>
-            {'🤝  This is a free community borrow. No fees — just neighborly trust.'}
+            {'🤝  This is a free community request. No fees — just neighborly trust.'}
           </Text>
         </View>
       </ScrollView>
@@ -354,10 +354,10 @@ export default function ToolRequestScreen() {
           ]}
           onPress={handleRequest}
         >
-          <Text style={styles.requestBtnText}>Send Borrow Request</Text>
+          <Text style={styles.requestBtnText}>Send Request</Text>
         </Pressable>
         <Text style={styles.footerNote}>
-          Free to borrow · No deposit required
+          Free to request · No deposit required
         </Text>
       </View>
     </View>

@@ -1,39 +1,31 @@
-import { Platform } from 'react-native';
+import { Platform, View } from 'react-native';
 import { Tabs } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Image } from 'expo-image';
+import { MaterialIcons } from '@expo/vector-icons';
 
-const HomeIcon = ({ color }: { color: string }) => (
-  <Image
-    source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/1:135.png' }}
-    style={{ width: 16, height: 18, tintColor: color }}
-    contentFit="contain"
-  />
-);
-
-const RideIcon = ({ color }: { color: string }) => (
-  <Image
-    source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/1:140.png' }}
-    style={{ width: 18, height: 16, tintColor: color }}
-    contentFit="contain"
-  />
-);
-
-const ActivityIcon = ({ color }: { color: string }) => (
-  <Image
-    source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/1:145.png' }}
-    style={{ width: 22, height: 16, tintColor: color }}
-    contentFit="contain"
-  />
-);
-
-const ProfileIcon = ({ color }: { color: string }) => (
-  <Image
-    source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/1:150.png' }}
-    style={{ width: 16, height: 16, tintColor: color }}
-    contentFit="contain"
-  />
-);
+function TabIcon({ name, focused }: { name: React.ComponentProps<typeof MaterialIcons>['name']; focused: boolean }) {
+  return (
+    <View style={{ position: 'relative', width: 32, height: 32, alignItems: 'center', justifyContent: 'center' }}>
+      {focused && (
+        <View
+          style={{
+            position: 'absolute',
+            width: 32,
+            height: 32,
+            borderRadius: 16,
+            backgroundColor: '#006156',
+            opacity: 0.12,
+          }}
+        />
+      )}
+      <MaterialIcons
+        name={name}
+        size={22}
+        color={focused ? '#064e3b' : '#64748b'}
+      />
+    </View>
+  );
+}
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
@@ -83,34 +75,28 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color }) => <HomeIcon color={color} />,
-          tabBarActiveTintColor: '#064e3b',
-          tabBarActiveBackgroundColor: '#d1fae5',
-          tabBarItemStyle: {
-            borderRadius: 24,
-            marginHorizontal: 2,
-          },
+          tabBarIcon: ({ focused }) => <TabIcon name="home" focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="discovery"
         options={{
           title: 'Co-Ride',
-          tabBarIcon: ({ color }) => <RideIcon color={color} />,
+          tabBarIcon: ({ focused }) => <TabIcon name="directions-car" focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="activity"
         options={{
           title: 'Activity',
-          tabBarIcon: ({ color }) => <ActivityIcon color={color} />,
+          tabBarIcon: ({ focused }) => <TabIcon name="public" focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color }) => <ProfileIcon color={color} />,
+          tabBarIcon: ({ focused }) => <TabIcon name="person" focused={focused} />,
         }}
       />
     </Tabs>

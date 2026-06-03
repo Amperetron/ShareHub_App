@@ -14,7 +14,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Colors } from '../constants/theme';
 import RideMapView from '../components/RideMapView';
-import { createRideBooking, fetchBookedRideSeats } from '../lib/api';
+import { createRideBooking, fetchBookedRideSeats, cancelRideBooking, completeRide, getCurrentUserId } from '../lib/api';
+import { supabase } from '../lib/supabase';
 
 const SEAT_LAYOUT = [
   { id: 's1', label: 'Front', position: 'front' },
@@ -34,6 +35,11 @@ export default function RideBookingScreen() {
     driverRides: string;
     departure: string;
     arrival: string;
+    departureLat?: string;
+    departureLng?: string;
+    arrivalLat?: string;
+    arrivalLng?: string;
+    distanceKm?: string;
     departureTime: string;
     arrivalTime: string;
     co2Saving: string;
@@ -51,6 +57,11 @@ export default function RideBookingScreen() {
     driverRides = '0',
     departure = '',
     arrival = '',
+    departureLat,
+    departureLng,
+    arrivalLat,
+    arrivalLng,
+    distanceKm,
     departureTime = '',
     arrivalTime = '',
     co2Saving = '0',
@@ -63,6 +74,10 @@ export default function RideBookingScreen() {
   const [confirmed, setConfirmed] = useState(false);
   const [bookedSeats, setBookedSeats] = useState<Set<string>>(new Set());
   const [invoice, setInvoice] = useState<{ id: string; createdAt: string; seatLabel: string } | null>(null);
+  const [isHost, setIsHost] = useState(false);
+  const [myBookingId, setMyBookingId] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [completing, setCompleting] = useState(false);
 
   const baseFare = parseInt(fare, 10);
   const ecoOffset = Math.round(baseFare * 0.05);
@@ -78,8 +93,20 @@ export default function RideBookingScreen() {
     fetchBookedRideSeats(rideId)
       .then(setBookedSeats)
       .catch((error) => {
-        Alert.alert('Could not load seats', error instanceof Error ? error.message : 'Please try again.');
+        Alert.alert('Could not load seats', JSON.stringify(error));
       });
+
+    getCurrentUserId().then((userId) => {
+      if (!userId) return;
+      if (params.driverName && userId) {
+        supabase.from('rides').select('driver_id').eq('id', rideId).single().then(({ data }) => {
+          if (data?.driver_id === userId) setIsHost(true);
+        });
+      }
+      supabase.from('ride_bookings').select('id').eq('ride_id', rideId).eq('passenger_id', userId).neq('status', 'cancelled').single().then(({ data }) => {
+        if (data?.id) setMyBookingId(data.id);
+      });
+    });
   }, [rideId]);
 
   async function handleConfirm() {
@@ -103,8 +130,57 @@ export default function RideBookingScreen() {
       });
       setConfirmed(true);
     } catch (error) {
-      Alert.alert('Booking failed', error instanceof Error ? error.message : 'Please try again.');
+      Alert.alert('Booking failed', JSON.stringify(error));
     }
+  }
+
+  async function handleCancelBooking() {
+    if (!myBookingId) return;
+    Alert.alert('Withdraw from Ride', 'Are you sure you want to cancel this booking?', [
+      { text: 'No', style: 'cancel' },
+      {
+        text: 'Yes, Withdraw',
+        style: 'destructive',
+        onPress: async () => {
+          setCancelling(true);
+          try {
+            await cancelRideBooking(myBookingId);
+            setMyBookingId(null);
+            Alert.alert('Cancelled', 'Your booking has been withdrawn.');
+            if (rideId) {
+              const seats = await fetchBookedRideSeats(rideId);
+              setBookedSeats(seats);
+            }
+          } catch (error: any) {
+            Alert.alert('Error', error?.message || 'Could not cancel booking.');
+          } finally {
+            setCancelling(false);
+          }
+        },
+      },
+    ]);
+  }
+
+  async function handleCompleteRide() {
+    if (!rideId) return;
+    Alert.alert('Complete Ride', 'Mark this ride as completed?', [
+      { text: 'No', style: 'cancel' },
+      {
+        text: 'Yes, Complete',
+        onPress: async () => {
+          setCompleting(true);
+          try {
+            await completeRide(rideId);
+            Alert.alert('Done', 'Ride marked as completed.');
+            router.back();
+          } catch (error: any) {
+            Alert.alert('Error', error?.message || 'Could not complete ride.');
+          } finally {
+            setCompleting(false);
+          }
+        },
+      },
+    ]);
   }
 
   if (confirmed) {
@@ -244,6 +320,27 @@ export default function RideBookingScreen() {
             departureTime={departureTime}
             arrivalTime={arrivalTime}
           />
+          {departureLat && departureLng && arrivalLat && arrivalLng ? (
+            <Pressable
+              style={styles.routeBtn}
+              onPress={() => router.push({
+                pathname: '/ride-route',
+                params: {
+                  departure,
+                  arrival,
+                  departureLat: departureLat ?? '',
+                  departureLng: departureLng ?? '',
+                  arrivalLat: arrivalLat ?? '',
+                  arrivalLng: arrivalLng ?? '',
+                  distanceKm: distanceKm ?? '',
+                  driverName,
+                  driverAvatar,
+                },
+              })}
+            >
+              <Text style={styles.routeBtnText}>View Full Route</Text>
+            </Pressable>
+          ) : null}
         </View>
 
         {/* Route Timeline */}
@@ -309,7 +406,7 @@ export default function RideBookingScreen() {
                 <Text style={styles.steeringLabel}>Driver</Text>
               </View>
               {/* Front passenger seat */}
-              {SEAT_LAYOUT.filter((s) => s.position === 'front' && !bookedSeats.has(s.label)).map((seat) => {
+              {SEAT_LAYOUT.filter((s) => s.position === 'front').map((seat) => {
                 const isTaken = bookedSeats.has(seat.label);
                 return (
                 <Pressable
@@ -336,7 +433,7 @@ export default function RideBookingScreen() {
 
             {/* Rear row */}
             <View style={styles.rearRow}>
-              {SEAT_LAYOUT.filter((s) => s.position !== 'front' && !bookedSeats.has(s.label)).map((seat) => {
+              {SEAT_LAYOUT.filter((s) => s.position !== 'front').map((seat) => {
                 const isTaken = bookedSeats.has(seat.label);
                 return (
                 <Pressable
@@ -414,22 +511,58 @@ export default function RideBookingScreen() {
 
       {/* Sticky Confirm Button */}
       <View style={[styles.stickyFooter, { paddingBottom: insets.bottom + 16 }]}>
-        <View style={styles.footerInfo}>
-          <Text style={styles.footerFare}>₹{totalFare}</Text>
-          <Text style={styles.footerFareLabel}>Total fare</Text>
-        </View>
-        <Pressable
-          style={({ pressed }) => [
-            styles.confirmBtn,
-            pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
-            !selectedSeat && styles.confirmBtnDisabled,
-          ]}
-          onPress={handleConfirm}
-        >
-          <Text style={styles.confirmBtnText}>
-            {selectedSeat ? 'Confirm Seat & Join' : 'Select a Seat First'}
-          </Text>
-        </Pressable>
+        {isHost ? (
+          <View style={{ flex: 1 }}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.confirmBtn,
+                pressed && { opacity: 0.85 },
+                completing && { opacity: 0.6 },
+              ]}
+              onPress={handleCompleteRide}
+              disabled={completing}
+            >
+              <Text style={styles.confirmBtnText}>
+                {completing ? 'Completing...' : 'Complete Ride'}
+              </Text>
+            </Pressable>
+          </View>
+        ) : myBookingId ? (
+          <View style={{ flex: 1, flexDirection: 'row', gap: 12 }}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.cancelBtn,
+                pressed && { opacity: 0.85 },
+                cancelling && { opacity: 0.6 },
+              ]}
+              onPress={handleCancelBooking}
+              disabled={cancelling}
+            >
+              <Text style={styles.cancelBtnText}>
+                {cancelling ? 'Withdrawing...' : 'Withdraw'}
+              </Text>
+            </Pressable>
+          </View>
+        ) : (
+          <>
+            <View style={styles.footerInfo}>
+              <Text style={styles.footerFare}>₹{totalFare}</Text>
+              <Text style={styles.footerFareLabel}>Total fare</Text>
+            </View>
+            <Pressable
+              style={({ pressed }) => [
+                styles.confirmBtn,
+                pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
+                !selectedSeat && styles.confirmBtnDisabled,
+              ]}
+              onPress={handleConfirm}
+            >
+              <Text style={styles.confirmBtnText}>
+                {selectedSeat ? 'Confirm Seat & Join' : 'Select a Seat First'}
+              </Text>
+            </Pressable>
+          </>
+        )}
       </View>
     </View>
   );
@@ -1134,5 +1267,34 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.white,
     letterSpacing: -0.3,
+  },
+  cancelBtn: {
+    flex: 1,
+    backgroundColor: 'rgba(239,68,68,0.1)',
+    borderRadius: 16,
+    paddingVertical: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.3)',
+  },
+  cancelBtnText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#dc2626',
+    letterSpacing: -0.3,
+  },
+  routeBtn: {
+    marginTop: 12,
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.primary,
+  },
+  routeBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.primary,
   },
 });

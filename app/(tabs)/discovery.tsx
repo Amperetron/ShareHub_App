@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,43 +7,62 @@ import {
   Pressable,
   Platform,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/theme';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
-import { fetchRides, type RideItem } from '../../lib/api';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { fetchRides, getCurrentProfile, type Profile, type RideItem } from '../../lib/api';
 import CreateShareModal from '../../components/CreateShareModal';
+import RideDetailModal from '../../components/RideDetailModal';
+import HeaderMenu from '../../components/HeaderMenu';
 
 export default function DiscoveryScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [rides, setRides] = useState<RideItem[]>([]);
   const [loadingRides, setLoadingRides] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [createVisible, setCreateVisible] = useState(false);
+  const [selectedRide, setSelectedRide] = useState<RideItem | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const mountedRef = useRef(true);
 
-  const loadRides = React.useCallback(async () => {
-    setLoadingRides(true);
-    const rows = await fetchRides();
-    setRides(rows);
-    setLoadingRides(false);
+  const loadRides = useCallback(async (silent = false) => {
+    if (!silent) setLoadingRides(true);
+    try {
+      const [rows, profileRow] = await Promise.all([fetchRides(), getCurrentProfile()]);
+      if (mountedRef.current) {
+        setRides(rows);
+        setProfile(profileRow);
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        Alert.alert('Could not load rides', JSON.stringify(error));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setLoadingRides(false);
+        setRefreshing(false);
+      }
+    }
   }, []);
 
-  useEffect(() => {
-    let mounted = true;
+  useFocusEffect(
+    useCallback(() => {
+      mountedRef.current = true;
+      loadRides();
+      return () => {
+        mountedRef.current = false;
+      };
+    }, [loadRides])
+  );
 
-    loadRides()
-      .then(() => {
-        if (!mounted) return;
-      })
-      .catch((error) => {
-        Alert.alert('Could not load rides', error instanceof Error ? error.message : 'Please try again.');
-      });
-
-    return () => {
-      mounted = false;
-    };
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadRides(true);
   }, [loadRides]);
 
   return (
@@ -51,16 +70,10 @@ export default function DiscoveryScreen() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <View style={styles.headerLeft}>
-          <View style={styles.avatarBorder}>
-            <Image
-              source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/80f1e3ed864f2f0aac80e203af6c6946c77d335b.jpg' }}
-              style={styles.avatarImg}
-              contentFit="cover"
-            />
-          </View>
-          <Text style={styles.headerBrand}>Neighborly</Text>
+          <HeaderMenu avatarUrl={profile?.avatar_url} />
+          <Text style={styles.headerBrand}>ShareHub</Text>
         </View>
-        <Pressable style={styles.notifBtn}>
+        <Pressable style={styles.notifBtn} onPress={() => router.push('/notifications')}>
           <Image
             source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/1:302.png' }}
             style={{ width: 16, height: 20 }}
@@ -73,57 +86,15 @@ export default function DiscoveryScreen() {
         style={styles.scroll}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 120 }]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[Colors.primary]} tintColor={Colors.primary} />
+        }
       >
         {/* Hero Brand Section */}
         <View style={styles.heroSection}>
           <View style={styles.heroRow}>
-            <Image
-              source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/0be76e07c3b7417178d2d312ceb20a9210fb2dc1.jpg' }}
-              style={styles.heroLogo}
-              contentFit="cover"
-            />
             <Text style={styles.heroTitle}>Co-Ride</Text>
           </View>
-          <Text style={styles.heroDesc}>
-            {'Find neighbors headed your way. Beat the Silk Board traffic together, save costs, and reduce carbon.'}
-          </Text>
-        </View>
-
-        {/* Route Search Card */}
-        <View style={styles.routeCard}>
-          <View style={styles.routeHeader}>
-            <Image
-              source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/1:167.png' }}
-              style={{ width: 18, height: 18 }}
-              contentFit="contain"
-            />
-            <Text style={styles.routeLabel}>Current Route</Text>
-          </View>
-
-          <View style={styles.routeDivider} />
-
-          <View style={styles.routeRow}>
-            <View style={[styles.routeDot, { backgroundColor: Colors.primary }]} />
-            <Text style={styles.routeStop}>{rides[0]?.departure ?? 'No departure selected'}</Text>
-          </View>
-
-          <View style={styles.verticalLine} />
-
-          <View style={styles.routeRow}>
-            <View style={[styles.routeDot, { backgroundColor: Colors.blueMid }]} />
-            <Text style={styles.routeStop}>{rides[0]?.arrival ?? 'No arrival selected'}</Text>
-          </View>
-        </View>
-
-        {/* Date Card */}
-        <View style={[styles.dateCard]}>
-          <Image
-            source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/1:183.png' }}
-            style={{ width: 27, height: 30, alignSelf: 'center' }}
-            contentFit="contain"
-          />
-          <Text style={styles.dateText}>{rides[0] ? 'Next ride' : 'No rides yet'}</Text>
-          <Text style={styles.dateSubText}>{rides[0]?.departureTime ?? 'Create a Co-Ride to show it here'}</Text>
         </View>
 
         {/* Nearby Pools Section */}
@@ -133,7 +104,11 @@ export default function DiscoveryScreen() {
             <Text style={styles.poolCount}>{loadingRides ? 'Loading' : `${rides.length} Available`}</Text>
           </View>
           {rides.map((ride) => (
-            <View key={ride.id} style={[styles.rideCard, { backgroundColor: Colors.white }]}>
+            <Pressable
+              key={ride.id}
+              style={[styles.rideCard, { backgroundColor: Colors.white }]}
+              onPress={() => setSelectedRide(ride)}
+            >
               <View style={styles.rideTop}>
                 <View style={styles.driverInfo}>
                   <View style={styles.driverAvatarWrap}>
@@ -146,7 +121,7 @@ export default function DiscoveryScreen() {
                   <View>
                     <Text style={styles.driverName}>{ride.driverName}</Text>
                     <View style={styles.ratingRow}>
-                      <Text style={styles.ratingText}>? {ride.driverRating} � {ride.driverRides} rides</Text>
+                      <Text style={styles.ratingText}>? {ride.driverRating} · {ride.driverRides} rides</Text>
                     </View>
                   </View>
                 </View>
@@ -166,13 +141,19 @@ export default function DiscoveryScreen() {
                 </View>
                 <View style={styles.routeStops}>
                   <View style={styles.stopRow}>
-                    <Text style={styles.stopLabel}>Departure</Text>
-                    <Text style={styles.stopValue}>{ride.departureTime} � {ride.departure}</Text>
+                    <View style={styles.stopTextCol}>
+                      <Text style={styles.stopLabel}>Departure</Text>
+                      <Text style={styles.stopValue} numberOfLines={2}>{ride.departure}</Text>
+                    </View>
+                    <Text style={styles.stopTime}>{ride.departureTime}</Text>
                   </View>
                   <View style={styles.stopDivider} />
                   <View style={styles.stopRow}>
-                    <Text style={styles.stopLabel}>Arrival</Text>
-                    <Text style={styles.stopValue}>{ride.arrivalTime} � {ride.arrival}</Text>
+                    <View style={styles.stopTextCol}>
+                      <Text style={styles.stopLabel}>Arrival</Text>
+                      <Text style={styles.stopValue} numberOfLines={2}>{ride.arrival}</Text>
+                    </View>
+                    <Text style={styles.stopTime}>{ride.arrivalTime}</Text>
                   </View>
                 </View>
               </View>
@@ -181,32 +162,13 @@ export default function DiscoveryScreen() {
                 <View style={styles.seatsRow}>
                   <Text style={styles.seatsText}>{ride.seatsLeft} seats left</Text>
                 </View>
-                <Pressable
+                <View
                   style={[styles.joinBtn, { backgroundColor: Colors.primary }]}
-                  onPress={() => router.push({
-                    pathname: '/ride-booking',
-                    params: {
-                      rideId: ride.id,
-                      driverName: ride.driverName,
-                      driverAvatar: ride.driverAvatar,
-                      driverRating: ride.driverRating,
-                      driverRides: ride.driverRides,
-                      departure: ride.departure,
-                      arrival: ride.arrival,
-                      departureTime: ride.departureTime,
-                      arrivalTime: ride.arrivalTime,
-                      co2Saving: ride.co2Saving,
-                      fare: ride.fare,
-                      seatsLeft: ride.seatsLeft,
-                      vehicleName: ride.vehicleName,
-                      vehicleNumber: ride.vehicleNumber,
-                    },
-                  })}
                 >
-                  <Text style={[styles.joinBtnText, { color: Colors.white }]}>Join Pool</Text>
-                </Pressable>
+                  <Text style={[styles.joinBtnText, { color: Colors.white }]}>View Details</Text>
+                </View>
               </View>
-            </View>
+            </Pressable>
           ))}
 
           {!loadingRides && rides.length === 0 ? (
@@ -235,14 +197,14 @@ export default function DiscoveryScreen() {
             <Text style={styles.ecoDesc}>
               {'Savings update from\nlive community rides.'}
             </Text>
-            <View style={styles.ecoBtn}>
+            <Pressable style={styles.ecoBtn} onPress={() => router.push('/(tabs)/profile')}>
               <Text style={styles.ecoBtnText}>View My Impact</Text>
               <Image
                 source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/1:289.png' }}
                 style={{ width: 16, height: 16 }}
                 contentFit="contain"
               />
-            </View>
+            </Pressable>
           </LinearGradient>
         </View>
       </ScrollView>
@@ -260,6 +222,65 @@ export default function DiscoveryScreen() {
         visible={createVisible}
         onClose={() => setCreateVisible(false)}
         onCreated={loadRides}
+      />
+
+      <RideDetailModal
+        visible={selectedRide !== null}
+        onClose={() => setSelectedRide(null)}
+        onJoin={() => {
+          if (!selectedRide) return;
+          setSelectedRide(null);
+          router.push({
+            pathname: '/ride-booking',
+            params: {
+              rideId: selectedRide.id,
+              driverName: selectedRide.driverName,
+              driverAvatar: selectedRide.driverAvatar,
+              driverRating: selectedRide.driverRating,
+              driverRides: selectedRide.driverRides,
+              departure: selectedRide.departure,
+              arrival: selectedRide.arrival,
+              departureLat: selectedRide.departureLat ?? '',
+              departureLng: selectedRide.departureLng ?? '',
+              arrivalLat: selectedRide.arrivalLat ?? '',
+              arrivalLng: selectedRide.arrivalLng ?? '',
+              distanceKm: selectedRide.distanceKm ?? '',
+              departureTime: selectedRide.departureTime,
+              arrivalTime: selectedRide.arrivalTime,
+              co2Saving: selectedRide.co2Saving,
+              fare: selectedRide.fare,
+              seatsLeft: selectedRide.seatsLeft,
+              vehicleName: selectedRide.vehicleName,
+              vehicleNumber: selectedRide.vehicleNumber,
+            },
+          });
+        }}
+        ride={selectedRide ? {
+          id: selectedRide.id,
+          driverName: selectedRide.driverName,
+          driverAvatar: selectedRide.driverAvatar,
+          driverRating: selectedRide.driverRating,
+          driverRides: selectedRide.driverRides,
+          departure: selectedRide.departure,
+          arrival: selectedRide.arrival,
+          departureLat: selectedRide.departureLat,
+          departureLng: selectedRide.departureLng,
+          arrivalLat: selectedRide.arrivalLat,
+          arrivalLng: selectedRide.arrivalLng,
+          distanceKm: selectedRide.distanceKm,
+          departureTime: selectedRide.departureTime,
+          arrivalTime: selectedRide.arrivalTime,
+          co2Saving: selectedRide.co2Saving,
+          fare: selectedRide.fare,
+          seatsLeft: selectedRide.seatsLeft,
+          vehicleName: selectedRide.vehicleName,
+          vehicleNumber: selectedRide.vehicleNumber,
+        } : {
+          id: '', driverName: '', driverAvatar: '', driverRating: '', driverRides: '',
+          departure: '', arrival: '', departureLat: null, departureLng: null,
+          arrivalLat: null, arrivalLng: null, distanceKm: null, departureTime: '',
+          arrivalTime: '', co2Saving: '', fare: '', seatsLeft: '', vehicleName: '', vehicleNumber: '',
+        }}
       />
     </View>
   );
@@ -331,12 +352,6 @@ const styles = StyleSheet.create({
   heroRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
-  },
-  heroLogo: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
   },
   heroTitle: {
     fontSize: 36,
@@ -350,83 +365,6 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     color: Colors.darkMid,
     lineHeight: 26,
-  },
-  routeCard: {
-    backgroundColor: Colors.white,
-    borderRadius: 24,
-    padding: 24,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    gap: 8,
-    ...Platform.select({
-      ios: {
-        shadowColor: Colors.dark,
-        shadowOffset: { width: 0, height: 12 },
-        shadowOpacity: 0.08,
-        shadowRadius: 40,
-      },
-      android: { elevation: 6 },
-    }),
-  },
-  routeHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingBottom: 8,
-  },
-  routeLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.muted,
-    letterSpacing: 1.4,
-  },
-  routeDivider: {
-    height: 1,
-    backgroundColor: Colors.border,
-    marginBottom: 8,
-  },
-  routeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  routeDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  routeStop: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.dark,
-    lineHeight: 28,
-  },
-  verticalLine: {
-    width: 1,
-    height: 16,
-    backgroundColor: Colors.border,
-    marginLeft: 3.5,
-    marginVertical: 4,
-  },
-  dateCard: {
-    backgroundColor: Colors.primaryLight,
-    borderRadius: 24,
-    padding: 24,
-    alignItems: 'center',
-    gap: 4,
-  },
-  dateText: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: Colors.tealBg,
-    lineHeight: 28,
-  },
-  dateSubText: {
-    fontSize: 14,
-    fontWeight: '400',
-    color: Colors.tealBg,
-    opacity: 0.9,
-    lineHeight: 20,
   },
   poolSection: {
     gap: 24,
@@ -537,20 +475,33 @@ const styles = StyleSheet.create({
     gap: 15,
   },
   stopRow: {
-    gap: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  stopTextCol: {
+    flex: 1,
+    gap: 2,
   },
   stopLabel: {
-    fontSize: 11,
-    fontWeight: '800',
+    fontSize: 10,
+    fontWeight: '700',
     color: Colors.muted,
     letterSpacing: 0.6,
-    lineHeight: 16.5,
+    textTransform: 'uppercase',
   },
   stopValue: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: Colors.dark,
-    lineHeight: 24,
+    lineHeight: 21,
+  },
+  stopTime: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.primary,
+    marginTop: 2,
   },
   stopDivider: {
     height: 1,

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,24 +10,37 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Colors } from '../../constants/theme';
-import { fetchActivities, type ActivityItem } from '../../lib/api';
+import { MaterialIcons } from '@expo/vector-icons';
+import { fetchActivities, getCurrentProfile, type ActivityItem, type Profile } from '../../lib/api';
+import HeaderMenu from '../../components/HeaderMenu';
 
 
 export default function ActivityScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeFilter, setActiveFilter] = useState('All');
+  const [profile, setProfile] = useState<Profile | null>(null);
 
   useEffect(() => {
     let mounted = true;
 
-    fetchActivities()
-      .then((rows) => {
-        if (mounted) setActivities(rows);
+    Promise.all([
+      fetchActivities(),
+      getCurrentProfile(),
+    ])
+      .then(([rows, profileRow]) => {
+        if (mounted) {
+          setActivities(rows);
+          setProfile(profileRow);
+        }
       })
       .catch((error) => {
-        Alert.alert('Could not load activity', error instanceof Error ? error.message : 'Please try again.');
+        Alert.alert('Could not load activity', JSON.stringify(error));
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -38,21 +51,25 @@ export default function ActivityScreen() {
     };
   }, []);
 
+  const filteredActivities = activities.filter((item) => {
+    if (activeFilter === 'All') return true;
+    if (activeFilter === 'Co-Ride') return item.type === 'ride';
+    if (activeFilter === 'Nabourly') return item.type === 'tool';
+
+    return true;
+  });
+
+  const FILTERS = ['All', 'Co-Ride', 'Nabourly'];
+
   return (
     <View style={styles.container}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <View style={styles.headerLeft}>
-          <View style={styles.avatarBorder}>
-            <Image
-              source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/b117e6a3283d05781cdb00ec910eb9c43edccf2a.jpg' }}
-              style={styles.avatarImg}
-              contentFit="cover"
-            />
-          </View>
-          <Text style={styles.headerBrand}>Neighborly</Text>
+          <HeaderMenu avatarUrl={profile?.avatar_url} />
+          <Text style={styles.headerBrand}>ShareHub</Text>
         </View>
-        <Pressable style={styles.notifBtn}>
+        <Pressable style={styles.notifBtn} onPress={() => router.push('/notifications')}>
           <Image
             source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/1:131.png' }}
             style={{ width: 16, height: 20 }}
@@ -78,19 +95,68 @@ export default function ActivityScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.chipsRow}
         >
-          {['All', 'Rides', 'Tools', 'Events', 'Help'].map((chip, i) => (
+          {FILTERS.map((chip) => (
             <Pressable
               key={chip}
-              style={[styles.chip, i === 0 && styles.chipActive]}
+              style={[styles.chip, activeFilter === chip && styles.chipActive]}
+              onPress={() => setActiveFilter(chip)}
             >
-              <Text style={[styles.chipText, i === 0 && styles.chipTextActive]}>{chip}</Text>
+              <Text style={[styles.chipText, activeFilter === chip && styles.chipTextActive]}>{chip}</Text>
             </Pressable>
           ))}
         </ScrollView>
 
+        {/* Quick Actions */}
+        <View style={styles.quickActions}>
+          <Text style={styles.quickActionsTitle}>Quick Actions</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.quickActionsRow}
+          >
+            <Pressable
+              style={styles.quickActionCard}
+              onPress={() => router.push('/(tabs)/discovery')}
+            >
+              <LinearGradient
+                colors={['#064e3b', '#006156']}
+                style={styles.quickActionGrad}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <View style={styles.quickActionEmojiWrap}>
+                  <MaterialIcons name="directions-car" size={20} color={Colors.white} />
+                </View>
+                <Text style={styles.quickActionLabel}>Join a Co-Ride</Text>
+                <Text style={styles.quickActionDesc}>Pool & save on your commute</Text>
+              </LinearGradient>
+            </Pressable>
+
+            <Pressable
+              style={styles.quickActionCard}
+              onPress={() => router.push('/tool-share')}
+            >
+              <LinearGradient
+                colors={['#366000', '#497b09']}
+                style={styles.quickActionGrad}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <View style={styles.quickActionEmojiWrap}>
+                  <MaterialIcons name="build" size={20} color={Colors.white} />
+                </View>
+                <Text style={styles.quickActionLabel}>Request Nabourly</Text>
+                <Text style={styles.quickActionDesc}>Drills, ladders & more nearby</Text>
+              </LinearGradient>
+            </Pressable>
+
+
+          </ScrollView>
+        </View>
+
         {/* Activity Feed */}
         <View style={styles.feed}>
-          {activities.map((item) => (
+          {filteredActivities.map((item) => (
             <View key={item.id} style={styles.activityCard}>
               <Image
                 source={{ uri: item.avatar }}
@@ -112,7 +178,7 @@ export default function ActivityScreen() {
               </View>
             </View>
           ))}
-          {!loading && activities.length === 0 ? (
+          {!loading && filteredActivities.length === 0 ? (
             <View style={styles.activityCard}>
               <View style={styles.activityContent}>
                 <Text style={styles.activityText}>No activity yet</Text>
@@ -135,6 +201,52 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.surface,
+  },
+  quickActions: {
+    gap: 12,
+  },
+  quickActionsTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.dark,
+  },
+  quickActionsRow: {
+    gap: 12,
+    paddingRight: 24,
+  },
+  quickActionCard: {
+    width: 180,
+    height: 160,
+    borderRadius: 24,
+    overflow: 'hidden',
+  },
+  quickActionGrad: {
+    flex: 1,
+    padding: 18,
+    justifyContent: 'space-between',
+  },
+  quickActionEmojiWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickActionEmoji: {
+    fontSize: 18,
+  },
+  quickActionLabel: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: Colors.white,
+    letterSpacing: -0.3,
+  },
+  quickActionDesc: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.7)',
+    lineHeight: 15,
   },
   header: {
     position: 'absolute',
@@ -292,4 +404,3 @@ const styles = StyleSheet.create({
     color: Colors.primary,
   },
 });
-

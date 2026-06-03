@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,47 +10,108 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { MaterialIcons } from '@expo/vector-icons';
 import { Colors } from '../../constants/theme';
-import { getCurrentImpact, getCurrentProfile, profileDisplayName, type Profile } from '../../lib/api';
+import { getCurrentImpact, getCurrentProfile, fetchUserBookings, fetchUserRides, fetchUserToolRequests, profileDisplayName, type Profile } from '../../lib/api';
+import { updateStreak } from '../../lib/streak';
+import HeaderMenu from '../../components/HeaderMenu';
+
+type Tab = 'Active' | 'Completed' | 'Cancelled';
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [impact, setImpact] = useState<any>(null);
+  const [streakCount, setStreakCount] = useState(0);
+  const [activeTab, setActiveTab] = useState<Tab>('Active');
+  const [bookings, setBookings] = useState<any[]>([]);
+  const [rides, setRides] = useState<any[]>([]);
+  const [toolRequests, setToolRequests] = useState<any[]>([]);
+  const [loadingActivity, setLoadingActivity] = useState(true);
+
+  const loadProfile = useCallback(async () => {
+    try {
+      const [profileRow, impactRow, streak] = await Promise.all([
+        getCurrentProfile(),
+        getCurrentImpact(),
+        updateStreak(),
+      ]);
+      setProfile(profileRow);
+      setImpact(impactRow);
+      if (streak !== null) setStreakCount(streak);
+    } catch (error) {
+      Alert.alert('Could not load profile', JSON.stringify(error));
+    }
+  }, []);
 
   useEffect(() => {
-    let mounted = true;
+    loadProfile();
+  }, [loadProfile]);
 
-    Promise.all([getCurrentProfile(), getCurrentImpact()])
-      .then(([profileRow, impactRow]) => {
+  useFocusEffect(
+    useCallback(() => {
+      let mounted = true;
+      setLoadingActivity(true);
+      loadProfile();
+      Promise.all([
+        fetchUserBookings().catch(() => []),
+        fetchUserRides().catch(() => []),
+        fetchUserToolRequests().catch(() => []),
+      ]).then(([bookingRows, rideRows, requestRows]) => {
         if (!mounted) return;
-        setProfile(profileRow);
-        setImpact(impactRow);
-      })
-      .catch((error) => {
-        Alert.alert('Could not load profile', error instanceof Error ? error.message : 'Please try again.');
-      });
+        setBookings(bookingRows);
+        setRides(rideRows);
+        setToolRequests(requestRows);
+      }).finally(() => { if (mounted) setLoadingActivity(false); });
+      return () => { mounted = false; };
+    }, [])
+  );
 
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  const filteredBookings = bookings.filter((b: any) => {
+    if (activeTab === 'Active') return b.status === 'pending' || b.status === 'confirmed';
+    if (activeTab === 'Completed') return b.status === 'completed';
+    if (activeTab === 'Cancelled') return b.status === 'cancelled';
+    return true;
+  });
+
+  const filteredRides = rides.filter((r: any) => {
+    if (activeTab === 'Active') return r.status === 'active';
+    if (activeTab === 'Completed') return r.status === 'completed';
+    if (activeTab === 'Cancelled') return r.status === 'cancelled';
+    return true;
+  });
+
+  const filteredToolRequests = toolRequests.filter((t: any) => {
+    if (activeTab === 'Active') return t.status === 'pending' || t.status === 'approved';
+    if (activeTab === 'Completed') return t.status === 'returned';
+    if (activeTab === 'Cancelled') return t.status === 'rejected';
+    return true;
+  });
+
+  const TABS: Tab[] = ['Active', 'Completed', 'Cancelled'];
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'pending': return { bg: 'rgba(251,191,36,0.15)', text: '#b45309' };
+      case 'confirmed': return { bg: 'rgba(0,97,86,0.1)', text: Colors.primary };
+      case 'active': return { bg: 'rgba(0,97,86,0.1)', text: Colors.primary };
+      case 'completed': return { bg: 'rgba(34,197,94,0.1)', text: '#16a34a' };
+      case 'cancelled': return { bg: 'rgba(239,68,68,0.1)', text: '#dc2626' };
+      default: return { bg: Colors.surface, text: Colors.muted };
+    }
+  };
 
   return (
     <View style={styles.container}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <View style={styles.headerLeft}>
-          <View style={styles.avatarBorder}>
-            <Image
-              source={{ uri: profile?.avatar_url || 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/ed08e0b3e6e6d486cb6f96c1b19a83922e1a83e0.jpg' }}
-              style={styles.avatarImg}
-              contentFit="cover"
-            />
-          </View>
-          <Text style={styles.headerBrand}>Neighborly</Text>
+          <HeaderMenu avatarUrl={profile?.avatar_url} />
+          <Text style={styles.headerBrand}>ShareHub</Text>
         </View>
-        <Pressable style={styles.notifBtn}>
+        <Pressable style={styles.notifBtn} onPress={() => router.push('/notifications')}>
           <Image
             source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/1:441.png' }}
             style={{ width: 16, height: 20 }}
@@ -94,42 +155,174 @@ export default function ProfileScreen() {
             </View>
           </View>
 
-          {/* Shares Card */}
+          {/* Streak Card */}
           <View style={[styles.sharesCard]}>
-            <Image
-              source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/1:336.png' }}
-              style={{ width: 31.5, height: 30 }}
-              contentFit="contain"
-            />
-            <Text style={styles.sharesLabel}>Shares</Text>
-            <Text style={styles.sharesValue}>{Number(impact?.tools_shared ?? profile?.shares_count ?? 0)}</Text>
-            <Text style={styles.sharesSubLabel}>Total contributions</Text>
-          </View>
-
-          {/* Trusted Neighbor Badge */}
-          <View style={styles.trustBadge}>
-            <View style={styles.trustIcon}>
+            <View style={styles.sharesContent}>
               <Image
-                source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/1:345.png' }}
-                style={{ width: 20, height: 25 }}
+                source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/1:336.png' }}
+                style={{ width: 25.6, height: 25.5 }}
                 contentFit="contain"
               />
+              <Text style={styles.sharesLabel}>Day Streak</Text>
             </View>
-            <View style={styles.trustContent}>
-              <Text style={styles.trustTitle}>Trusted Neighbor</Text>
-              <Text style={styles.trustDesc}>
-                {`${profile?.rating ?? 0} rating from local households.`}
-              </Text>
+            <View>
+              <Text style={styles.sharesValue}>{streakCount}</Text>
+              <Text style={styles.sharesSubLabel}>Consecutive days active</Text>
             </View>
           </View>
+
+          {/* Account Settings Link */}
+          <Pressable style={styles.trustBadge} onPress={() => router.push('/account-settings')}>
+            <View style={styles.trustIcon}>
+              <MaterialIcons name="settings" size={24} color={Colors.white} />
+            </View>
+            <View style={styles.trustContent}>
+              <Text style={styles.trustTitle}>Account Settings</Text>
+              <Text style={styles.trustDesc}>Update profile, password, or picture</Text>
+            </View>
+            <MaterialIcons name="chevron-right" size={20} color={Colors.muted} />
+          </Pressable>
         </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Your Activity</Text>
-          <View style={styles.activeCard}>
-            <Text style={styles.activeTitle}>No local records to show here yet</Text>
-            <Text style={styles.activeSubtitle}>Created rides, shared items, event activity, and bookings are stored in Supabase and appear across the app.</Text>
+
+          {/* Tab Bar */}
+          <View style={styles.tabBar}>
+            {TABS.map((tab) => (
+              <Pressable
+                key={tab}
+                style={[styles.tab, activeTab === tab && styles.tabActive]}
+                onPress={() => setActiveTab(tab)}
+              >
+                <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>{tab}</Text>
+                  {tab === 'Active' && (
+                  <View style={[styles.tabBadge, activeTab === tab && styles.tabBadgeActive]}>
+                    <Text style={[styles.tabBadgeText, activeTab === tab && styles.tabBadgeTextActive]}>
+                      {bookings.filter((b: any) => b.status === 'pending' || b.status === 'confirmed').length +
+                       rides.filter((r: any) => r.status === 'active').length +
+                       toolRequests.filter((t: any) => t.status === 'pending' || t.status === 'approved').length}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+            ))}
           </View>
+
+          {/* Bookings */}
+          {filteredBookings.map((booking: any) => {
+            const statusStyle = getStatusColor(booking.status);
+            return (
+              <Pressable
+                key={booking.id}
+                style={styles.activityCard}
+                onPress={() => router.push({
+                  pathname: '/ride-detail',
+                  params: { rideId: booking.ride_id, bookingId: booking.id, role: 'passenger' },
+                })}
+              >
+                <View style={styles.activityCardRow}>
+                  <View style={styles.activityCardIcon}>
+                    <MaterialIcons name="directions-car" size={18} color={Colors.primary} />
+                  </View>
+                  <View style={styles.activityCardContent}>
+                    <Text style={styles.activityCardTitle} numberOfLines={1}>
+                      Ride Booking
+                    </Text>
+                    <Text style={styles.activityCardMeta}>Seat: {booking.seat_label} · ₹{booking.fare_paid}</Text>
+                  </View>
+                  <View style={[styles.statusPill, { backgroundColor: statusStyle.bg }]}>
+                    <Text style={[styles.statusText, { color: statusStyle.text }]}>
+                      {booking.status.charAt(0).toUpperCase() + booking.status.slice(1)}
+                    </Text>
+                  </View>
+                </View>
+              </Pressable>
+            );
+          })}
+
+          {/* Rides */}
+          {filteredRides.map((ride: any) => {
+            const statusStyle = getStatusColor(ride.status);
+            return (
+              <Pressable
+                key={ride.id}
+                style={styles.activityCard}
+                onPress={() => router.push({
+                  pathname: '/coride-manage',
+                  params: { rideId: ride.id, role: 'host' },
+                })}
+              >
+                <View style={styles.activityCardRow}>
+                  <View style={styles.activityCardIcon}>
+                    <Text style={{ fontSize: 16 }}>🚙</Text>
+                  </View>
+                  <View style={styles.activityCardContent}>
+                    <Text style={styles.activityCardTitle} numberOfLines={1}>
+                      {ride.departure} → {ride.arrival}
+                    </Text>
+                    <Text style={styles.activityCardMeta}>
+                      {ride.seats_total - ride.seats_left}/{ride.seats_total} seats · ₹{ride.fare}
+                    </Text>
+                  </View>
+                  <View style={[styles.statusPill, { backgroundColor: statusStyle.bg }]}>
+                    <Text style={[styles.statusText, { color: statusStyle.text }]}>
+                      {ride.status.charAt(0).toUpperCase() + ride.status.slice(1)}
+                    </Text>
+                  </View>
+                </View>
+              </Pressable>
+            );
+          })}
+
+          {/* Tool Requests */}
+          {filteredToolRequests.map((request: any) => {
+            const statusStyle = getStatusColor(request.status);
+            const isBorrower = request.borrowerId !== undefined;
+            return (
+              <Pressable
+                key={request.id}
+                style={styles.activityCard}
+                onPress={() => router.push({
+                  pathname: '/nabourly-detail',
+                  params: { requestId: request.id },
+                })}
+              >
+                <View style={styles.activityCardRow}>
+                  <View style={styles.activityCardIcon}>
+                    <MaterialIcons name={request.toolEmoji === '📩' ? 'inbox' : 'build'} size={18} color={Colors.primary} />
+                  </View>
+                  <View style={styles.activityCardContent}>
+                    <Text style={styles.activityCardTitle} numberOfLines={1}>
+                      {request.toolName}
+                    </Text>
+                    <Text style={styles.activityCardMeta}>
+                      {request.toolCategory} · {isBorrower ? 'Requested by you' : `From ${request.borrowerName}`}
+                    </Text>
+                  </View>
+                  <View style={[styles.statusPill, { backgroundColor: statusStyle.bg }]}>
+                    <Text style={[styles.statusText, { color: statusStyle.text }]}>
+                      {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
+                    </Text>
+                  </View>
+                </View>
+              </Pressable>
+            );
+          })}
+
+          {/* Empty State */}
+          {!loadingActivity && filteredBookings.length === 0 && filteredRides.length === 0 && filteredToolRequests.length === 0 && (
+            <View style={styles.activeCard}>
+              <Text style={styles.activeTitle}>No {activeTab.toLowerCase()} activity</Text>
+              <Text style={styles.activeSubtitle}>
+                {activeTab === 'Active'
+                  ? 'Your upcoming rides and requests will appear here.'
+                  : activeTab === 'Completed'
+                  ? 'Completed rides and requests will show up here.'
+                  : 'Cancelled rides and requests will be listed here.'}
+              </Text>
+            </View>
+          )}
         </View>
       </ScrollView>
     </View>
@@ -201,6 +394,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 4,
     alignSelf: 'flex-start',
+    flexShrink: 0,
   },
   memberBadgeText: {
     fontSize: 12,
@@ -283,7 +477,7 @@ const styles = StyleSheet.create({
     color: Colors.white,
     opacity: 0.7,
     lineHeight: 28,
-    letterSpacing: -2.4,
+    letterSpacing: 0.5,
     marginBottom: 4,
   },
   sharesCard: {
@@ -292,8 +486,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     borderRadius: 32,
     padding: 24,
-    gap: 8,
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     ...Platform.select({
       ios: {
         shadowColor: Colors.dark,
@@ -303,6 +496,9 @@ const styles = StyleSheet.create({
       },
       android: { elevation: 4 },
     }),
+  },
+  sharesContent: {
+    gap: 8,
   },
   sharesLabel: {
     fontSize: 18,
@@ -532,4 +728,60 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     lineHeight: 24,
   },
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    padding: 4,
+    gap: 4,
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    gap: 6,
+  },
+  tabActive: { backgroundColor: Colors.primary },
+  tabText: { fontSize: 14, fontWeight: '600', color: Colors.muted },
+  tabTextActive: { color: Colors.white },
+  tabBadge: {
+    backgroundColor: Colors.surface,
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  tabBadgeActive: { backgroundColor: 'rgba(255,255,255,0.3)' },
+  tabBadgeText: { fontSize: 11, fontWeight: '700', color: Colors.muted },
+  tabBadgeTextActive: { color: Colors.white },
+  activityCard: {
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  activityCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  activityCardIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activityCardContent: { flex: 1, gap: 2 },
+  activityCardTitle: { fontSize: 14, fontWeight: '700', color: Colors.dark },
+  activityCardMeta: { fontSize: 12, color: Colors.muted },
+  statusPill: { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
+  statusText: { fontSize: 11, fontWeight: '700' },
 });

@@ -12,7 +12,7 @@ const SignInScreen = () => {
       await signInWithEmail(email.trim(), password);
       router.replace('/(tabs)');
     } catch (error) {
-      Alert.alert('Sign in failed', error instanceof Error ? error.message : 'Please try again.');
+      Alert.alert('Sign in failed', error instanceof Error ? error.message : JSON.stringify(error));
     }
   };
 

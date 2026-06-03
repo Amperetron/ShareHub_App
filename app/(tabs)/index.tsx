@@ -12,6 +12,7 @@ import {
   Keyboard,
   Dimensions,
   Alert,
+  Modal,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,18 +25,23 @@ import {
   Easing,
   runOnJS,
 } from 'react-native-reanimated';
+import { MaterialIcons } from '@expo/vector-icons';
 import { Colors } from '../../constants/theme';
-import { fetchActivities, fetchSearchItems, getCurrentImpact, getCurrentProfile, profileDisplayName, type ActivityItem, type Profile, type SearchItem } from '../../lib/api';
+import { fetchActivities, fetchRides, fetchSearchItems, getCurrentImpact, getCurrentProfile, profileDisplayName, type ActivityItem, type Profile, type RideItem, type SearchItem } from '../../lib/api';
+import { updateStreak } from '../../lib/streak';
+import { getSessionCount, incrementSessionCount } from '../../lib/session';
 import CreateShareModal from '../../components/CreateShareModal';
+import RideDetailModal from '../../components/RideDetailModal';
+import HeaderMenu from '../../components/HeaderMenu';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
 const INITIAL_RECENT: string[] = [];
 
-const CATEGORY_ICONS: Record<string, string> = {
-  Ride: '🚗',
-  Tool: '🔧',
-  Event: '🌱',
+const CATEGORY_ICONS: Record<string, React.ComponentProps<typeof MaterialIcons>['name']> = {
+  Ride: 'directions-car',
+  Tool: 'build',
+  Event: 'event',
 };
 
 // ─── Animated Counter Hook ───────────────────────────────────────────────────
@@ -80,19 +86,33 @@ export default function HomeScreen() {
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [impact, setImpact] = useState<any>(null);
+  const [streakCount, setStreakCount] = useState(0);
   const [createVisible, setCreateVisible] = useState(false);
+  const [nearbyPools, setNearbyPools] = useState<RideItem[]>([]);
+  const [selectedRide, setSelectedRide] = useState<RideItem | null>(null);
+  const [showAvatarPrompt, setShowAvatarPrompt] = useState(false);
 
   const loadHomeData = useCallback(async () => {
-    const [items, profileRow, impactRow, activityRows] = await Promise.all([
+    const [items, profileRow, impactRow, activityRows, rides] = await Promise.all([
       fetchSearchItems(),
       getCurrentProfile(),
       getCurrentImpact(),
       fetchActivities(),
+      fetchRides(),
     ]);
     setSearchData(items);
     setProfile(profileRow);
     setImpact(impactRow);
     setActivities(activityRows);
+    setNearbyPools(rides.slice(0, 3));
+
+    const streak = await updateStreak();
+    if (streak !== null) setStreakCount(streak);
+
+    const sessionCount = await incrementSessionCount();
+    if (sessionCount % 4 === 0 && !profileRow?.avatar_url) {
+      setShowAvatarPrompt(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -103,7 +123,7 @@ export default function HomeScreen() {
         if (!mounted) return;
       })
       .catch((error) => {
-        Alert.alert('Could not load home data', error instanceof Error ? error.message : 'Please try again.');
+        Alert.alert('Could not load home data', JSON.stringify(error));
       });
 
     return () => {
@@ -113,7 +133,6 @@ export default function HomeScreen() {
 
   // ─── Counter animation state ─────────────────────────────────────────────
   const co2Counter = useCounterAnimation(Math.round(Number(impact?.carbon_saved ?? 0)), 0);
-  const waterCounter = useCounterAnimation(Math.round(Number(impact?.water_saved ?? 0)), 180);
   const hasAnimatedRef = useRef(false);
 
   // Track bento section position and scroll offset
@@ -127,9 +146,8 @@ export default function HomeScreen() {
     if (bentoSectionY.current <= visibleThreshold) {
       hasAnimatedRef.current = true;
       co2Counter.trigger();
-      waterCounter.trigger();
     }
-  }, [co2Counter, waterCounter]);
+  }, [co2Counter]);
 
   const handleBentoLayout = useCallback((event: any) => {
     const { y } = event.nativeEvent.layout;
@@ -190,19 +208,13 @@ export default function HomeScreen() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <View style={styles.headerLeft}>
-          <View style={styles.avatarBorder}>
-            <Image
-              source={{ uri: profile?.avatar_url || 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/b117e6a3283d05781cdb00ec910eb9c43edccf2a.jpg' }}
-              style={styles.avatarImg}
-              contentFit="cover"
-            />
-          </View>
+          <HeaderMenu avatarUrl={profile?.avatar_url} />
           <View style={styles.headerText}>
             <Text style={styles.headerGreeting}>Namaskara,</Text>
             <Text style={styles.headerName}>{profileDisplayName(profile)}</Text>
           </View>
         </View>
-        <Pressable style={styles.notifBtn}>
+        <Pressable style={styles.notifBtn} onPress={() => router.push('/notifications')}>
           <Image
             source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/1:131.png' }}
             style={{ width: 16, height: 20 }}
@@ -217,7 +229,7 @@ export default function HomeScreen() {
           <View style={styles.overlaySearchRow}>
             <View style={styles.overlaySearchBar}>
               <View style={styles.searchIcon}>
-                <Text style={{ fontSize: 16 }}>🔍</Text>
+                <MaterialIcons name="search" size={16} color={Colors.dark} />
               </View>
               <TextInput
                 ref={inputRef}
@@ -235,7 +247,7 @@ export default function HomeScreen() {
               {query.length > 0 ? (
                 <Pressable onPress={handleClearSearch} style={styles.clearBtn} hitSlop={8}>
                   <View style={styles.clearIconWrap}>
-                    <Text style={styles.clearIconText}>✕</Text>
+                    <MaterialIcons name="close" size={10} color={Colors.muted} />
                   </View>
                 </Pressable>
               ) : null}
@@ -255,10 +267,10 @@ export default function HomeScreen() {
               contentContainerStyle={styles.resultsContent}
               ListEmptyComponent={
                 <View style={styles.emptyState}>
-                  <Text style={styles.emptyIcon}>🔍</Text>
+                  <MaterialIcons name="search" size={40} color={Colors.muted} />
                   <Text style={styles.emptyTitle}>No results found</Text>
                   <Text style={styles.emptySubtitle}>
-                    Try searching for rides, tools, or events
+                    Try searching for rides or tools
                   </Text>
                 </View>
               }
@@ -275,7 +287,7 @@ export default function HomeScreen() {
                   onPress={() => handleSelectResult(item.title)}
                 >
                   <View style={styles.resultIconWrap}>
-                    <Text style={styles.resultIcon}>{CATEGORY_ICONS[item.category]}</Text>
+                    <MaterialIcons name={CATEGORY_ICONS[item.category] || 'search'} size={18} color={Colors.dark} />
                   </View>
                   <View style={styles.resultContent}>
                     <Text style={styles.resultTitle}>{item.title}</Text>
@@ -308,7 +320,7 @@ export default function HomeScreen() {
                         style={styles.recentLeft}
                         onPress={() => handleSelectRecent(term)}
                       >
-                        <Text style={styles.recentClockIcon}>🕐</Text>
+                        <MaterialIcons name="history" size={16} color={Colors.muted} />
                         <Text style={styles.recentTerm}>{term}</Text>
                       </Pressable>
                       <Pressable
@@ -316,7 +328,7 @@ export default function HomeScreen() {
                         hitSlop={8}
                         style={styles.recentRemove}
                       >
-                        <Text style={styles.recentRemoveText}>✕</Text>
+                        <MaterialIcons name="close" size={12} color={Colors.muted} />
                       </Pressable>
                     </View>
                   ))}
@@ -326,18 +338,18 @@ export default function HomeScreen() {
               <View style={styles.quickSection}>
                 <Text style={styles.recentTitle}>Browse by Category</Text>
                 <View style={styles.quickGrid}>
-                  {[
-                    { label: 'Co-Rides', icon: '🚗', bg: 'rgba(127,197,253,0.2)', color: '#006496' },
-                    { label: 'Tool Share', icon: '🔧', bg: 'rgba(73,123,9,0.2)', color: '#366000' },
-                    { label: 'Events', icon: '🌱', bg: 'rgba(140,245,228,0.3)', color: '#00201c' },
-                    { label: 'Help', icon: '🤝', bg: 'rgba(0,97,86,0.1)', color: Colors.primary },
-                  ].map((cat) => (
+                  {([
+                    { label: 'Co-Rides', icon: 'directions-car' as const, bg: 'rgba(127,197,253,0.2)', color: '#006496' },
+                    { label: 'Nabourly', icon: 'build' as const, bg: 'rgba(73,123,9,0.2)', color: '#366000' },
+
+                    { label: 'Help', icon: 'volunteer-activism' as const, bg: 'rgba(0,97,86,0.1)', color: Colors.primary },
+                  ] as const).map((cat) => (
                     <Pressable
                       key={cat.label}
                       style={[styles.quickCard, { backgroundColor: cat.bg }]}
                       onPress={() => setQuery(cat.label)}
                     >
-                      <Text style={styles.quickIcon}>{cat.icon}</Text>
+                      <MaterialIcons name={cat.icon} size={28} color={cat.color} />
                       <Text style={[styles.quickLabel, { color: cat.color }]}>{cat.label}</Text>
                     </Pressable>
                   ))}
@@ -356,42 +368,18 @@ export default function HomeScreen() {
         onScroll={handleScroll}
         scrollEventThrottle={16}
       >
-        {/* Hero Search Section */}
+        {/* Hero Section */}
         <View style={styles.heroSection}>
           <Text style={styles.heroText}>
-            <Text style={styles.heroRegular}>{'Better things\nhappen\n'}</Text>
+            <Text style={styles.heroRegular}>{'Better things happen\n'}</Text>
             <Text style={styles.heroHighlight}>{'when neighbors\nunite.'}</Text>
           </Text>
-
-          <Pressable
-            style={styles.searchBar}
-            onPress={() => {
-              setFocused(true);
-              setTimeout(() => inputRef.current?.focus(), 50);
-            }}
-            accessibilityLabel="Search rides, tools and community activities"
-          >
-            <View style={styles.searchIcon}>
-              <Text style={{ fontSize: 16 }}>🔍</Text>
-            </View>
-            <Text style={styles.searchPlaceholder}>
-              {query.length > 0 ? query : 'Find a ride to Indiranagar, a drill, or help...'}
-            </Text>
-            {query.length > 0 && (
-              <View style={[styles.resultTag, { backgroundColor: '#d1fae5' }]}>
-                <Text style={[styles.resultTagText, { color: Colors.primary }]}>Active</Text>
-              </View>
-            )}
-          </Pressable>
         </View>
 
         {/* Essentials Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Community Essentials</Text>
-            <TouchableOpacity>
-              <Text style={styles.viewAllBtn}>View All</Text>
-            </TouchableOpacity>
+            <Text style={styles.sectionTitle}>Get Started</Text>
           </View>
 
           <ScrollView
@@ -435,27 +423,67 @@ export default function HomeScreen() {
               <View style={[styles.cardBadge, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
                 <Text style={[styles.cardBadgeText, { color: '#d5ffa7' }]}>Community Hub</Text>
               </View>
-              <Text style={[styles.cardTitle, { color: '#d5ffa7' }]}>Tool Share</Text>
+              <Text style={[styles.cardTitle, { color: '#d5ffa7' }]}>Nabourly</Text>
               <Text style={[styles.cardDesc, { color: '#d5ffa7' }]}>
-                {'Borrow drills or ladders\nfor DIY weekends.'}
+                {'Request drills or ladders\nfor DIY weekends.'}
               </Text>
               <View style={[styles.cardBtn, { backgroundColor: '#d5ffa7' }]}>
                 <Text style={[styles.cardBtnText, { color: '#366000' }]}>Explore</Text>
               </View>
             </Pressable>
+
+
           </ScrollView>
         </View>
+
+        {/* Nearby Pools Section */}
+        {nearbyPools.length > 0 ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Nearby Pools</Text>
+              <TouchableOpacity onPress={() => router.push('/(tabs)/discovery')}>
+                <Text style={styles.viewAllBtn}>View All</Text>
+              </TouchableOpacity>
+            </View>
+            {nearbyPools.map((ride) => (
+              <Pressable
+                key={ride.id}
+                style={styles.poolCard}
+                onPress={() => setSelectedRide(ride)}
+              >
+                <View style={styles.poolCardTop}>
+                  <View style={styles.poolRouteCol}>
+                    <Text style={styles.poolRouteLabel}>Departure</Text>
+                    <Text style={styles.poolRoute} numberOfLines={2}>{ride.departure}</Text>
+                    <Text style={styles.poolTime}>{ride.departureTime}</Text>
+                  </View>
+                  <View style={styles.poolRouteDivider} />
+                  <View style={styles.poolRouteCol}>
+                    <Text style={styles.poolRouteLabel}>Arrival</Text>
+                    <Text style={styles.poolRoute} numberOfLines={2}>{ride.arrival}</Text>
+                    <Text style={styles.poolTime}>{ride.arrivalTime}</Text>
+                  </View>
+                  <Text style={styles.poolCo2}>-{ride.co2Saving}kg CO₂</Text>
+                </View>
+                <View style={styles.poolCardBottom}>
+                  <Text style={styles.poolDriver}>{ride.driverName}</Text>
+                  <Text style={styles.poolSeats}>{ride.seatsLeft} seats · ₹{ride.fare}</Text>
+                </View>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
 
         {/* Green Footprint Section */}
         <View style={styles.section} onLayout={handleBentoLayout}>
           <Text style={styles.sectionTitle}>Your Green Footprint</Text>
 
           <View style={styles.bentoGrid}>
-            {/* CO2 Saved — animated counter */}
+            {/* Carbon Saved — animated counter */}
             <View style={[styles.bentoCard, { width: '47%' }]}>
               <Image
                 source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/1:51.png' }}
-                style={{ width: '100%', height: 21.3 }}
+                style={{ width: 31.5, height: 30 }}
                 contentFit="contain"
               />
               <View style={styles.counterRow}>
@@ -464,82 +492,39 @@ export default function HomeScreen() {
                 </Text>
                 <Text style={[styles.bentoUnit, { color: Colors.primary }]}>kg</Text>
               </View>
-              <Text style={styles.bentoLabel}>CO2 Saved</Text>
+              <Text style={styles.bentoLabel}>Carbon Saved</Text>
             </View>
 
-            {/* Water Saved — animated counter */}
+            {/* Day Streak card */}
             <View style={[styles.bentoCard, { width: '47%' }]}>
               <Image
-                source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/1:58.png' }}
-                style={{ width: '100%', height: 25 }}
+                source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/1:336.png' }}
+                style={{ width: 31.5, height: 30 }}
                 contentFit="contain"
               />
               <View style={styles.counterRow}>
-                <Text style={[styles.bentoNumber, { color: Colors.blueMid }]}>
-                  {waterCounter.display}
+                <Text style={[styles.bentoNumber, { color: '#d97706' }]}>
+                  {streakCount}
                 </Text>
-                <Text style={[styles.bentoUnit, { color: Colors.blueMid }]}>L</Text>
               </View>
-              <Text style={styles.bentoLabel}>Water Saved</Text>
+              <Text style={styles.bentoLabel}>Day Streak</Text>
             </View>
 
             {/* Community Badge */}
-            <View style={[styles.bentoDark, { width: '100%' }]}>
+            <Pressable style={[styles.bentoDark, { width: '100%' }]} onPress={() => router.push('/(tabs)/profile')}>
               <View style={styles.bentoDarkContent}>
-                <Text style={styles.bentoDarkMilestone}>Verified Milestone</Text>
-                <Text style={styles.bentoDarkTitle}>Community Hero Badge</Text>
+                <Text style={styles.bentoDarkTitle}>View your contribution to the society</Text>
                 <Text style={styles.bentoDarkDesc}>
-                  {'Sustainable activity updates from your profile.'}
+                  {'Track your impact on the community.'}
                 </Text>
               </View>
               <View style={styles.bentoDarkBadge}>
-                <Image
-                  source={{ uri: 'https://cdn-ai.onspace.ai/onspace/figma/cxM1apJc3lTLRH6lpdyuWA/1:72.png' }}
-                  style={{ width: 20, height: 26.2 }}
-                  contentFit="contain"
-                />
+                <MaterialIcons name="eco" size={24} color="#a7f3d0" />
               </View>
-            </View>
+            </Pressable>
           </View>
         </View>
 
-        {/* Community Activity Feed */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{"What's happening nearby?"}</Text>
-
-          <View style={styles.activityList}>
-            {activities.map((item) => (
-              <View key={item.id} style={styles.activityCard}>
-                {item.avatar ? (
-                  <Image source={{ uri: item.avatar }} style={styles.activityAvatar} contentFit="cover" />
-                ) : (
-                  <View style={[styles.activityAvatar, styles.activityAvatarFallback]}>
-                    <Text style={styles.activityAvatarInitial}>{item.name.charAt(0).toUpperCase()}</Text>
-                  </View>
-                )}
-                <View style={styles.activityContent}>
-                  <Text style={styles.activityText}>
-                    <Text style={{ fontWeight: '700' }}>{item.name}</Text>
-                    <Text style={{ fontWeight: '400' }}>{` ${item.action} `}</Text>
-                    <Text style={{ fontWeight: '700' }}>{item.target}</Text>
-                  </Text>
-                  <Text style={styles.activityMeta}>{item.meta}</Text>
-                  <View style={[styles.activityBadge, { backgroundColor: item.badgeBg }]}>
-                    <Text style={[styles.activityBadgeText, { color: item.badgeColor }]}>{item.badge}</Text>
-                  </View>
-                </View>
-              </View>
-            ))}
-            {activities.length === 0 ? (
-              <View style={styles.activityCard}>
-                <View style={styles.activityContent}>
-                  <Text style={styles.activityText}>No activity yet</Text>
-                  <Text style={styles.activityMeta}>Create a ride, item, or event to start the feed.</Text>
-                </View>
-              </View>
-            ) : null}
-          </View>
-        </View>
       </ScrollView>
 
       {/* FAB */}
@@ -558,6 +543,90 @@ export default function HomeScreen() {
         onClose={() => setCreateVisible(false)}
         onCreated={loadHomeData}
       />
+
+      <RideDetailModal
+        visible={selectedRide !== null}
+        onClose={() => setSelectedRide(null)}
+        onJoin={() => {
+          if (!selectedRide) return;
+          setSelectedRide(null);
+          router.push({
+            pathname: '/ride-booking',
+            params: {
+              rideId: selectedRide.id,
+              driverName: selectedRide.driverName,
+              driverAvatar: selectedRide.driverAvatar,
+              driverRating: selectedRide.driverRating,
+              driverRides: selectedRide.driverRides,
+              departure: selectedRide.departure,
+              arrival: selectedRide.arrival,
+              departureLat: selectedRide.departureLat ?? '',
+              departureLng: selectedRide.departureLng ?? '',
+              arrivalLat: selectedRide.arrivalLat ?? '',
+              arrivalLng: selectedRide.arrivalLng ?? '',
+              distanceKm: selectedRide.distanceKm ?? '',
+              departureTime: selectedRide.departureTime,
+              arrivalTime: selectedRide.arrivalTime,
+              co2Saving: selectedRide.co2Saving,
+              fare: selectedRide.fare,
+              seatsLeft: selectedRide.seatsLeft,
+              vehicleName: selectedRide.vehicleName,
+              vehicleNumber: selectedRide.vehicleNumber,
+            },
+          });
+        }}
+        ride={selectedRide ? {
+          id: selectedRide.id,
+          driverName: selectedRide.driverName,
+          driverAvatar: selectedRide.driverAvatar,
+          driverRating: selectedRide.driverRating,
+          driverRides: selectedRide.driverRides,
+          departure: selectedRide.departure,
+          arrival: selectedRide.arrival,
+          departureLat: selectedRide.departureLat,
+          departureLng: selectedRide.departureLng,
+          arrivalLat: selectedRide.arrivalLat,
+          arrivalLng: selectedRide.arrivalLng,
+          distanceKm: selectedRide.distanceKm,
+          departureTime: selectedRide.departureTime,
+          arrivalTime: selectedRide.arrivalTime,
+          co2Saving: selectedRide.co2Saving,
+          fare: selectedRide.fare,
+          seatsLeft: selectedRide.seatsLeft,
+          vehicleName: selectedRide.vehicleName,
+          vehicleNumber: selectedRide.vehicleNumber,
+        } : {
+          id: '', driverName: '', driverAvatar: '', driverRating: '', driverRides: '',
+          departure: '', arrival: '', departureLat: null, departureLng: null,
+          arrivalLat: null, arrivalLng: null, distanceKm: null, departureTime: '',
+          arrivalTime: '', co2Saving: '', fare: '', seatsLeft: '', vehicleName: '', vehicleNumber: '',
+        }}
+      />
+
+      <Modal visible={showAvatarPrompt} transparent animationType="fade">
+        <View style={styles.avatarPromptOverlay}>
+          <View style={styles.avatarPromptCard}>
+            <Text style={styles.avatarPromptTitle}>Set Your Profile Picture</Text>
+            <Text style={styles.avatarPromptDesc}>
+              A profile picture helps your neighbors recognize you in the community. Would you like to add one?
+            </Text>
+            <View style={styles.avatarPromptActions}>
+              <Pressable
+                style={styles.avatarPromptBtn}
+                onPress={() => { setShowAvatarPrompt(false); router.push('/account-settings'); }}
+              >
+                <Text style={styles.avatarPromptBtnText}>Set Picture</Text>
+              </Pressable>
+              <Pressable
+                style={styles.avatarPromptSkip}
+                onPress={() => setShowAvatarPrompt(false)}
+              >
+                <Text style={styles.avatarPromptSkipText}>Not Now</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -688,11 +757,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  clearIconText: {
-    fontSize: 10,
-    color: Colors.muted,
-    fontWeight: '700',
-  },
+
   cancelBtn: {
     paddingHorizontal: 4,
     paddingVertical: 8,
@@ -748,9 +813,6 @@ const styles = StyleSheet.create({
       android: { elevation: 2 },
     }),
   },
-  resultIcon: {
-    fontSize: 18,
-  },
   resultContent: {
     flex: 1,
     gap: 2,
@@ -783,9 +845,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 60,
     gap: 8,
-  },
-  emptyIcon: {
-    fontSize: 40,
   },
   emptyTitle: {
     fontSize: 18,
@@ -834,9 +893,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
-  recentClockIcon: {
-    fontSize: 16,
-  },
   recentTerm: {
     fontSize: 15,
     fontWeight: '500',
@@ -846,11 +902,7 @@ const styles = StyleSheet.create({
   recentRemove: {
     padding: 4,
   },
-  recentRemoveText: {
-    fontSize: 12,
-    color: Colors.muted,
-    fontWeight: '600',
-  },
+
 
   // ─── Quick Categories ─────────────────────────────────────────────────────
   quickSection: {
@@ -870,9 +922,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     alignItems: 'center',
     gap: 8,
-  },
-  quickIcon: {
-    fontSize: 28,
   },
   quickLabel: {
     fontSize: 14,
@@ -923,6 +972,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+
   searchPlaceholder: {
     fontSize: 16,
     fontWeight: '400',
@@ -951,6 +1001,80 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#006156',
     lineHeight: 20,
+  },
+  poolCard: {
+    backgroundColor: Colors.white,
+    borderRadius: 16,
+    padding: 16,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...Platform.select({
+      ios: {
+        shadowColor: Colors.dark,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.06,
+        shadowRadius: 12,
+      },
+      android: { elevation: 3 },
+    }),
+  },
+  poolCardTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  poolRouteCol: {
+    flex: 1,
+    gap: 2,
+  },
+  poolRouteLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: Colors.muted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  poolRoute: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.dark,
+  },
+  poolTime: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
+  poolRouteDivider: {
+    width: 1,
+    backgroundColor: Colors.border,
+    alignSelf: 'stretch',
+    marginTop: 2,
+  },
+  poolCo2: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.greenDeep,
+    backgroundColor: 'rgba(0,97,86,0.08)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  poolCardBottom: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  poolDriver: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.darkMid,
+  },
+  poolSeats: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.primary,
   },
   cardsRow: {
     paddingRight: 24,
@@ -1039,6 +1163,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     lineHeight: 36,
   },
+
   bentoUnit: {
     fontSize: 16,
     fontWeight: '700',
@@ -1188,6 +1313,68 @@ const styles = StyleSheet.create({
       },
       android: { elevation: 16 },
     }),
+  },
+
+  // ─── Avatar Prompt Modal ──────────────────────────────────────────────────
+  avatarPromptOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  avatarPromptCard: {
+    backgroundColor: Colors.white,
+    borderRadius: 32,
+    padding: 32,
+    gap: 16,
+    width: '100%',
+    maxWidth: 360,
+    alignItems: 'center',
+  },
+  avatarPromptTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.dark,
+    textAlign: 'center',
+  },
+  avatarPromptDesc: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: Colors.muted,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  avatarPromptActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+    width: '100%',
+  },
+  avatarPromptBtn: {
+    flex: 1,
+    backgroundColor: Colors.primary,
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  avatarPromptBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.white,
+  },
+  avatarPromptSkip: {
+    flex: 1,
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  avatarPromptSkipText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.muted,
   },
 });
 
