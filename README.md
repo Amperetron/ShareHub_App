@@ -1,75 +1,83 @@
-# Welcome to OnSpace AI
+# ShareHub
 
-Onspace AI empowers anyone to turn ideas into powerful AI applications in minutes—no coding required. Our free, no-code platform enables effortless creation of custom AI apps; simply describe your vision and our agentic AI handles the rest. The onspace-app, built with React Native and Expo, demonstrates this capability—integrating popular third-party libraries to deliver seamless cross-platform performance across iOS, Android, and Web environments.
-
-## Getting Started
-
-### 1. Install Dependencies
-
-```bash
-npm install
-# or
-yarn install
-```
-
-### 2. Start the Project
-
-- Start the development server (choose your platform):
-
-```bash
-npm run start         # Start Expo development server
-npm run android       # Launch Android emulator
-npm run ios           # Launch iOS simulator
-npm run web           # Start the web version
-```
-
-- Reset the project (clear cache, etc.):
-
-```bash
-npm run reset-project
-```
-
-### 3. Lint the Code
-
-```bash
-npm run lint
-```
-
-## Main Dependencies
-
-- React Native: 0.79.4
-- React: 19.0.0
-- Expo: ~53.0.12
-- Expo Router: ~5.1.0
-- Supabase: ^2.50.0
-- Other commonly used libraries:  
-  - @expo/vector-icons  
-  - react-native-paper  
-  - react-native-calendars  
-  - lottie-react-native  
-  - react-native-webview  
-  - and more
-
-For a full list of dependencies, see [package.json](./package.json).
-
-## Development Tools
-
-- TypeScript: ~5.8.3
-- ESLint: ^9.25.0
-- @babel/core: ^7.25.2
-
-## Contributing
-
-1. Fork this repository
-2. Create a new branch (`git checkout -b main`)
-3. Commit your changes (`git commit -am 'Add new feature'`)
-4. Push to the branch (`git push origin feature/your-feature`)
-5. Open a Pull Request
-
-## License
-
-This project is private ("private": true). For collaboration inquiries, please contact the author.
+A cross-platform hub optimized for seamless, ultra-fast content discovery, resource mapping, and workspace synchronization. Built utilizing Expo, React Native, and an optimized native compilation pipeline.
 
 ---
 
-Feel free to add project screenshots, API documentation, feature descriptions, or any other information as needed.
+## Direct Installation (Android)
+
+If you are looking to test or deploy the application instantly without compiling the source code locally, grab the production-ready binary below:
+
+[![Download APK](https://img.shields.io/badge/Download-Application_APK-005c4b?style=for-the-badge&logo=android&logoColor=white)](android/app/build/outputs/apk/release/app-release.apk)
+
+Tip: Alternatively, check out the Releases tab on GitHub for versioned history, incremental update changelogs, and target platform architectures.
+
+---
+
+## Key Architectural Features
+
+- **Blazing Fast State Synch:** Optimized context routers minimizing accidental render cascades across operational spaces.
+- **Unified Identity Layers:** Streamlined routing patterns for account provisioning and secure local profile storage.
+- **Low-Overhead Component Tree:** Clean UI mapping built with modern design principles, utilizing smooth lazy loading transitions for asset arrays.
+
+---
+
+## Development & Local Fabrication
+
+For developers wanting to audit the bytecode, interface with adb pipelines, or build custom native variants locally on systems like Arch Linux.
+
+### 1. Prerequisites
+Ensure your local system matches the baseline compilation stack:
+- **Node.js:** ^18.x or ^20.x
+- **Java Development Kit:** JDK 17 (Required for modern Gradle structures)
+- **Android SDK:** Command-line tools with matching platform-tools (adb)
+
+### 2. Environment Setup
+Clone the tracking repository and install dependencies securely using your preferred package manager:
+```bash
+git clone [https://github.com/Amperetron/ShareHub_App.git](https://github.com/Amperetron/ShareHub_App.git)
+cd ShareHub_App
+npm install
+
+```
+
+### 3. Local Prebuild (Native Layer Materialization)
+
+If modifying native activity hooks or updating manifest configuration definitions, generate your bare android directories using:
+
+```bash
+npx expo prebuild --platform android
+
+```
+
+### 4. Direct Compilation & Deployment
+
+To run an incremental debug build or push a release compilation directly onto a connected physical handset or emulator link over adb:
+
+```bash
+# Execute local development instance
+npx expo run:android
+
+# Fabricate an optimized, signed release binary locally
+npx expo run:android --variant release
+```
+
+## Project Topography
+
+A high-level view of the isolated layout:
+
+
+text
+├── app/                  # Application Core Navigation & Tab Modules
+│   ├── (tabs)/           # Core operational workspaces (Index, Profile)
+│   └── account-settings  # User identity & authentication management matrices
+├── android/              # Native Android wrapper files & Gradle pipeline tools
+├── assets/               # High-resolution UI imagery and adaptive launcher elements
+├── app.json              # Main Expo app configuration manifest
+└── eas.json              # Local & Cloud building profiles
+
+
+
+## License
+
+Distributed under the MIT License. See LICENSE for more details.
