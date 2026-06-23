@@ -12,10 +12,14 @@ import {
   View,
   ActivityIndicator,
 } from 'react-native';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Colors } from '../constants/theme';
 import { MaterialIcons } from '@expo/vector-icons';
 import { createRide, createTool, createToolRequest, getRouteDistance, calculateCarbonSaved } from '../lib/api';
+import { supabase } from '../lib/supabase';
 import LocationPickerModal from './LocationPickerModal';
 
 type CreateType = 'ride' | 'tool' | 'request';
@@ -30,8 +34,8 @@ type Props = {
 
 const CHOICES: { type: CreateType; title: string; desc: string; iconName: string }[] = [
   { type: 'ride', title: 'Create Co-Ride', desc: 'Offer seats on your route.', iconName: 'directions-car' },
-  { type: 'tool', title: 'Lend Nabourly', desc: 'Share a tool or household item.', iconName: 'build' },
-  { type: 'request', title: 'Request Nabourly', desc: 'Ask to borrow a tool or item.', iconName: 'inbox' },
+  { type: 'tool', title: 'Lend Nabourly', desc: 'Lend an item, helper, or share anything.', iconName: 'card-giftcard' },
+  { type: 'request', title: 'Request Nabourly', desc: 'Ask to borrow an item or get support.', iconName: 'inbox' },
 ];
 
 function toNumber(value: string, fallback = 0) {
@@ -39,10 +43,16 @@ function toNumber(value: string, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function toLocalISOString(date: Date): string {
+  const offset = date.getTimezoneOffset();
+  const localDate = new Date(date.getTime() - offset * 60 * 1000);
+  return localDate.toISOString().slice(0, 16);
+}
+
 function getDefaultDepartureTime(): string {
   const date = new Date();
   date.setMinutes(date.getMinutes() + 30);
-  return date.toISOString().slice(0, 16);
+  return toLocalISOString(date);
 }
 
 export default function CreateShareModal({ visible, onClose, onCreated, initialType = null }: Props) {
@@ -77,13 +87,13 @@ export default function CreateShareModal({ visible, onClose, onCreated, initialT
 
   const [toolName, setToolName] = useState('');
   const [toolBrand, setToolBrand] = useState('');
-  const [toolCategory, setToolCategory] = useState('Power Tools');
+  const [toolCategory, setToolCategory] = useState('');
   const [toolCondition, setToolCondition] = useState('Good');
   const [toolDescription, setToolDescription] = useState('');
   const [toolEmoji, setToolEmoji] = useState('');
 
   const [requestName, setRequestName] = useState('');
-  const [requestCategory, setRequestCategory] = useState('Power Tools');
+  const [requestCategory, setRequestCategory] = useState('');
   const [requestDescription, setRequestDescription] = useState('');
   const [requestMessage, setRequestMessage] = useState('');
 
@@ -113,12 +123,12 @@ export default function CreateShareModal({ visible, onClose, onCreated, initialT
     setRouteDistance(null);
     setToolName('');
     setToolBrand('');
-    setToolCategory('Power Tools');
+    setToolCategory('');
     setToolCondition('Good');
     setToolDescription('');
     setToolEmoji('');
     setRequestName('');
-    setRequestCategory('Power Tools');
+    setRequestCategory('');
     setRequestDescription('');
     setRequestMessage('');
   }
@@ -581,7 +591,6 @@ function RideForm({
       />
 
       <Field label="Fare (₹)" value={fare} onChangeText={onFareChange} placeholder="0" keyboardType="numeric" />
-      <Field label="Seats available" value={seats} onChangeText={onSeatsChange} placeholder="3" keyboardType="numeric" />
       <Field label="Vehicle" value={vehicleName} onChangeText={onVehicleNameChange} placeholder="Model and color" />
       <Field label="Vehicle number" value={vehicleNumber} onChangeText={onVehicleNumberChange} placeholder="KA 01 AB 1234" />
     </ScrollView>
@@ -617,14 +626,128 @@ function ToolForm({
   onDescriptionChange,
   onEmojiChange,
 }: ToolFormProps) {
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  const decodeBase64 = (base64: string): ArrayBuffer => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const bufferLength = base64.length * 0.75;
+    const len = base64.length;
+    let p = 0;
+    let j = 0;
+    if (base64[len - 1] === '=') {
+      p++;
+      if (base64[len - 2] === '=') p++;
+    }
+    const arrayBuffer = new ArrayBuffer(bufferLength - p);
+    const bytes = new Uint8Array(arrayBuffer);
+    for (let i = 0; i < len; i += 4) {
+      const encoded1 = chars.indexOf(base64[i]);
+      const encoded2 = chars.indexOf(base64[i + 1]);
+      const encoded3 = chars.indexOf(base64[i + 2]);
+      const encoded4 = chars.indexOf(base64[i + 3]);
+      const bytes1 = (encoded1 << 2) | (encoded2 >> 4);
+      const bytes2 = ((encoded2 & 15) << 4) | (encoded3 >> 2);
+      const bytes3 = ((encoded3 & 3) << 6) | (encoded4 & 63);
+      bytes[j++] = bytes1;
+      if (encoded3 !== -1 && base64[i + 2] !== '=') {
+        bytes[j++] = bytes2;
+      }
+      if (encoded4 !== -1 && base64[i + 3] !== '=') {
+        bytes[j++] = bytes3;
+      }
+    }
+    return arrayBuffer;
+  };
+
+  const handlePickImage = async () => {
+    try {
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permissionResult.granted) {
+        Alert.alert('Permission required', 'We need permission to access your library to upload a picture.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+
+      if (result.canceled || !result.assets?.length) return;
+
+      setUploadingImage(true);
+      const uri = result.assets[0].uri;
+      
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: 'base64',
+      });
+      const arrayBuffer = decodeBase64(base64);
+      
+      const fileExt = uri.split('.').pop() || 'jpg';
+      const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
+      const filePath = `tools/${fileName}`;
+
+      const { data, error } = await supabase.storage
+        .from('tools')
+        .upload(filePath, arrayBuffer, {
+          contentType: `image/${fileExt === 'png' ? 'png' : 'jpeg'}`,
+          upsert: true
+        });
+
+      if (error) {
+        throw error;
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('tools')
+        .getPublicUrl(filePath);
+
+      onEmojiChange(urlData.publicUrl);
+    } catch (err: any) {
+      console.error(err);
+      Alert.alert('Upload failed', err.message || 'An error occurred during image upload.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
   return (
     <ScrollView style={styles.formContainer} contentContainerStyle={styles.formContent}>
-      <Field label="Item name" value={name} onChangeText={onNameChange} placeholder="Power Drill" />
-      <Field label="Brand" value={brand} onChangeText={onBrandChange} placeholder="Bosch GSB 500" />
-      <Field label="Category" value={category} onChangeText={onCategoryChange} placeholder="Power Tools" />
-      <Field label="Condition" value={condition} onChangeText={onConditionChange} placeholder="Good" />
-      <Field label="Emoji" value={emoji} onChangeText={onEmojiChange} placeholder="🔧" />
-      <Field label="Description" value={description} onChangeText={onDescriptionChange} placeholder="Useful for wall mounting and DIY." multiline />
+      <Field label="Item name" value={name} onChangeText={onNameChange} placeholder="Camping Tent, Wrench, Board Game..." />
+      <Field label="Brand" value={brand} onChangeText={onBrandChange} placeholder="Brand/Model (optional)" />
+      <Field label="Category" value={category} onChangeText={onCategoryChange} placeholder="Electronics, Garden, Kitchen, etc." />
+      <Field label="Condition Description" value={condition} onChangeText={onConditionChange} placeholder="Good" />
+      
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Image</Text>
+        {emoji && emoji.startsWith('http') ? (
+          <View style={styles.imagePreviewContainer}>
+            <Image source={{ uri: emoji }} style={styles.imagePreview} contentFit="cover" />
+            <View style={styles.imageActionButtons}>
+              <Pressable style={styles.changeImageBtn} onPress={handlePickImage} disabled={uploadingImage}>
+                {uploadingImage ? <ActivityIndicator size="small" color="#ffffff" /> : <Text style={styles.changeImageText}>Change</Text>}
+              </Pressable>
+              <Pressable style={styles.deleteImageBtn} onPress={() => onEmojiChange('')}>
+                <Text style={styles.deleteImageText}>Remove</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : (
+          <Pressable style={styles.uploadImageBtn} onPress={handlePickImage} disabled={uploadingImage}>
+            {uploadingImage ? (
+              <ActivityIndicator size="small" color={Colors.primary} />
+            ) : (
+              <>
+                <MaterialIcons name="add-a-photo" size={24} color={Colors.primary} />
+                <Text style={styles.uploadImageText}>Upload Image</Text>
+              </>
+            )}
+          </Pressable>
+        )}
+      </View>
+
+      <Field label="Description" value={description} onChangeText={onDescriptionChange} placeholder="Describe the item, how to use it, etc." multiline />
     </ScrollView>
   );
 }
@@ -657,8 +780,8 @@ function ToolRequestForm({
           Your request will be visible to lenders who have matching items.
         </Text>
       </View>
-      <Field label="What do you need?" value={name} onChangeText={onNameChange} placeholder="Power Drill, Garden Hose, etc." />
-      <Field label="Category" value={category} onChangeText={onCategoryChange} placeholder="Power Tools" />
+      <Field label="What do you need?" value={name} onChangeText={onNameChange} placeholder="Camping Tent, Wrench, Board Game, etc." />
+      <Field label="Category" value={category} onChangeText={onCategoryChange} placeholder="Electronics, Garden, Kitchen, etc." />
       <Field label="Description (optional)" value={description} onChangeText={onDescriptionChange} placeholder="What will you use it for?" multiline />
       <Field label="Message to lenders (optional)" value={message} onChangeText={onMessageChange} placeholder="Hi, I need this for a weekend project..." multiline />
     </ScrollView>
@@ -686,6 +809,17 @@ function NativeDateTimePicker({
     return new Date();
   });
 
+  useEffect(() => {
+    if (value) {
+      const d = new Date(value);
+      if (!isNaN(d.getTime())) {
+        setTempDate(d);
+      }
+    } else {
+      setTempDate(new Date());
+    }
+  }, [value]);
+
   const displayValue = value
     ? new Date(value).toLocaleString([], {
         month: 'short',
@@ -703,6 +837,8 @@ function NativeDateTimePicker({
       setTempDate(updated);
       if (Platform.OS === 'android') {
         setShowTime(true);
+      } else {
+        onChange(toLocalISOString(updated));
       }
     }
   }
@@ -713,7 +849,7 @@ function NativeDateTimePicker({
       const updated = new Date(tempDate);
       updated.setHours(selectedTime.getHours(), selectedTime.getMinutes(), 0, 0);
       setTempDate(updated);
-      onChange(updated.toISOString().slice(0, 16));
+      onChange(toLocalISOString(updated));
     }
   }
 
@@ -1044,5 +1180,67 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.muted,
     textAlign: 'center',
+  },
+  imagePreviewContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    justifyContent: 'space-between',
+  },
+  imagePreview: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+  },
+  imageActionButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  changeImageBtn: {
+    backgroundColor: Colors.primary,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  changeImageText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  deleteImageBtn: {
+    backgroundColor: '#ef4444',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteImageText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  uploadImageBtn: {
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: Colors.primary,
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    backgroundColor: Colors.accentBg,
+  },
+  uploadImageText: {
+    color: Colors.primary,
+    fontWeight: '600',
+    fontSize: 14,
   },
 });

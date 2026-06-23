@@ -96,11 +96,15 @@ export default function ToolMapView({ filteredTools, selectedMapTool, setSelecte
                 {/* Pin circle */}
                 <View style={[
                   styles.pinBody,
-                  { backgroundColor: catColor },
+                  { backgroundColor: catColor, overflow: 'hidden' },
                   isSelected && styles.pinBodySelected,
                   !tool.available && { opacity: 0.55 },
                 ]}>
-                  <Text style={styles.pinEmoji}>{tool.emoji}</Text>
+                  {tool.emoji && tool.emoji.startsWith('http') ? (
+                    <Image source={{ uri: tool.emoji }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+                  ) : (
+                    <Text style={styles.pinEmoji}>{tool.emoji}</Text>
+                  )}
                 </View>
                 {/* Triangle tip */}
                 <View style={[styles.pinTip, { borderTopColor: catColor }]} />
@@ -149,8 +153,12 @@ export default function ToolMapView({ filteredTools, selectedMapTool, setSelecte
           onPress={() => selectedObj.available && onRequestBorrow(selectedObj)}
         >
           <View style={[styles.mapToolCardAccent, { backgroundColor: selectedObj.accentColor }]} />
-          <View style={[styles.mapToolCardEmoji, { backgroundColor: selectedObj.color }]}>
-            <Text style={styles.mapToolCardEmojiText}>{selectedObj.emoji}</Text>
+          <View style={[styles.mapToolCardEmoji, { backgroundColor: selectedObj.color, overflow: 'hidden' }]}>
+            {selectedObj.emoji && selectedObj.emoji.startsWith('http') ? (
+              <Image source={{ uri: selectedObj.emoji }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+            ) : (
+              <Text style={styles.mapToolCardEmojiText}>{selectedObj.emoji}</Text>
+            )}
           </View>
           <View style={styles.mapToolCardInfo}>
             <View style={styles.mapToolCardHeader}>

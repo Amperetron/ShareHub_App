@@ -13,7 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors } from '../../constants/theme';
-import { getCurrentImpact, getCurrentProfile, fetchUserBookings, fetchUserRides, fetchUserToolRequests, profileDisplayName, type Profile } from '../../lib/api';
+import { getCurrentImpact, getCurrentProfile, fetchUserBookings, fetchUserRides, fetchUserToolRequests, fetchUserTools, profileDisplayName, type Profile } from '../../lib/api';
 import { updateStreak } from '../../lib/streak';
 import HeaderMenu from '../../components/HeaderMenu';
 
@@ -29,6 +29,7 @@ export default function ProfileScreen() {
   const [bookings, setBookings] = useState<any[]>([]);
   const [rides, setRides] = useState<any[]>([]);
   const [toolRequests, setToolRequests] = useState<any[]>([]);
+  const [userTools, setUserTools] = useState<any[]>([]);
   const [loadingActivity, setLoadingActivity] = useState(true);
 
   const loadProfile = useCallback(async () => {
@@ -59,11 +60,13 @@ export default function ProfileScreen() {
         fetchUserBookings().catch(() => []),
         fetchUserRides().catch(() => []),
         fetchUserToolRequests().catch(() => []),
-      ]).then(([bookingRows, rideRows, requestRows]) => {
+        fetchUserTools().catch(() => []),
+      ]).then(([bookingRows, rideRows, requestRows, toolRows]) => {
         if (!mounted) return;
         setBookings(bookingRows);
         setRides(rideRows);
         setToolRequests(requestRows);
+        setUserTools(toolRows);
       }).finally(() => { if (mounted) setLoadingActivity(false); });
       return () => { mounted = false; };
     }, [])
@@ -89,6 +92,8 @@ export default function ProfileScreen() {
     if (activeTab === 'Cancelled') return t.status === 'rejected';
     return true;
   });
+
+  const activeUserTools = activeTab === 'Active' ? userTools.filter((t: any) => t.available) : [];
 
   const TABS: Tab[] = ['Active', 'Completed', 'Cancelled'];
 
@@ -201,7 +206,8 @@ export default function ProfileScreen() {
                     <Text style={[styles.tabBadgeText, activeTab === tab && styles.tabBadgeTextActive]}>
                       {bookings.filter((b: any) => b.status === 'pending' || b.status === 'confirmed').length +
                        rides.filter((r: any) => r.status === 'active').length +
-                       toolRequests.filter((t: any) => t.status === 'pending' || t.status === 'approved').length}
+                       toolRequests.filter((t: any) => t.status === 'pending' || t.status === 'approved').length +
+                       userTools.filter((t: any) => t.available).length}
                     </Text>
                   </View>
                 )}
@@ -278,7 +284,7 @@ export default function ProfileScreen() {
           {/* Tool Requests */}
           {filteredToolRequests.map((request: any) => {
             const statusStyle = getStatusColor(request.status);
-            const isBorrower = request.borrowerId !== undefined;
+            const isBorrower = request.borrowerId === profile?.id;
             return (
               <Pressable
                 key={request.id}
@@ -290,14 +296,14 @@ export default function ProfileScreen() {
               >
                 <View style={styles.activityCardRow}>
                   <View style={styles.activityCardIcon}>
-                    <MaterialIcons name={request.toolEmoji === '📩' ? 'inbox' : 'build'} size={18} color={Colors.primary} />
+                    <MaterialIcons name={isBorrower ? 'inbox' : 'card-giftcard'} size={18} color={Colors.primary} />
                   </View>
                   <View style={styles.activityCardContent}>
                     <Text style={styles.activityCardTitle} numberOfLines={1}>
-                      {request.toolName}
+                      {isBorrower ? 'Requested: ' : 'Lending: '}{request.toolName}
                     </Text>
                     <Text style={styles.activityCardMeta}>
-                      {request.toolCategory} · {isBorrower ? 'Requested by you' : `From ${request.borrowerName}`}
+                      {request.toolCategory} · {isBorrower ? 'Requested by you' : `Lending to ${request.borrowerName}`}
                     </Text>
                   </View>
                   <View style={[styles.statusPill, { backgroundColor: statusStyle.bg }]}>
@@ -310,8 +316,43 @@ export default function ProfileScreen() {
             );
           })}
 
+          {/* Active Listings (Lend Offers and Request Posts) */}
+          {activeUserTools.map((tool: any) => {
+            const isRequest = tool.type === 'request' || tool.emoji === '📩';
+            return (
+              <Pressable
+                key={`listing-${tool.id}`}
+                style={styles.activityCard}
+                onPress={() => router.push('/tool-share')}
+              >
+                <View style={styles.activityCardRow}>
+                  <View style={styles.activityCardIcon}>
+                    {tool.emoji && tool.emoji.startsWith('http') ? (
+                      <Image source={{ uri: tool.emoji }} style={{ width: '100%', height: '100%', borderRadius: 10 }} contentFit="cover" />
+                    ) : (
+                      <Text style={{ fontSize: 16 }}>{tool.emoji || '🔧'}</Text>
+                    )}
+                  </View>
+                  <View style={styles.activityCardContent}>
+                    <Text style={styles.activityCardTitle} numberOfLines={1}>
+                      {isRequest ? 'Requesting: ' : 'Offering: '}{tool.name}
+                    </Text>
+                    <Text style={styles.activityCardMeta}>
+                      {tool.category} · Listed on board
+                    </Text>
+                  </View>
+                  <View style={[styles.statusPill, { backgroundColor: 'rgba(0,97,86,0.1)' }]}>
+                    <Text style={[styles.statusText, { color: Colors.primary }]}>
+                      Active
+                    </Text>
+                  </View>
+                </View>
+              </Pressable>
+            );
+          })}
+
           {/* Empty State */}
-          {!loadingActivity && filteredBookings.length === 0 && filteredRides.length === 0 && filteredToolRequests.length === 0 && (
+          {!loadingActivity && filteredBookings.length === 0 && filteredRides.length === 0 && filteredToolRequests.length === 0 && activeUserTools.length === 0 && (
             <View style={styles.activeCard}>
               <Text style={styles.activeTitle}>No {activeTab.toLowerCase()} activity</Text>
               <Text style={styles.activeSubtitle}>

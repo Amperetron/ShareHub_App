@@ -50,6 +50,7 @@
 | lends_count | int4 | default 0 |
 | latitude | float8 | nullable |
 | longitude | float8 | nullable |
+| type | text | nullable, 'offer' or 'request' |
 | created_at | timestamptz | |
 | updated_at | timestamptz | |
 

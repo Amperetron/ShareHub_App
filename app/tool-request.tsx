@@ -93,12 +93,12 @@ export default function ToolRequestScreen() {
 
   async function handleRequest() {
     if (!message.trim()) {
-      Alert.alert('Add a message', 'Please introduce yourself and explain how you plan to use the tool.');
+      Alert.alert('Add a message', 'Please introduce yourself and explain how you plan to use the item.');
       return;
     }
 
     if (!toolId || !ownerId) {
-      Alert.alert('Missing tool details', 'Please go back and select the tool again.');
+      Alert.alert('Missing details', 'Please go back and select the item again.');
       return;
     }
 
@@ -132,8 +132,12 @@ export default function ToolRequestScreen() {
           end={{ x: 1, y: 1 }}
         />
         <View style={styles.successContent}>
-          <View style={styles.successIcon}>
-            <Text style={{ fontSize: 52 }}>{toolEmoji}</Text>
+          <View style={[styles.successIcon, { overflow: 'hidden' }]}>
+            {toolEmoji && toolEmoji.startsWith('http') ? (
+              <Image source={{ uri: toolEmoji }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+            ) : (
+              <Text style={{ fontSize: 52 }}>{toolEmoji}</Text>
+            )}
           </View>
           <Text style={styles.successTitle}>Request Sent!</Text>
           <Text style={styles.successDesc}>
@@ -168,8 +172,12 @@ export default function ToolRequestScreen() {
       >
         {/* Tool Hero Card */}
         <View style={[styles.toolHeroCard, { borderColor: toolColor }]}>
-          <View style={[styles.toolEmojiWrap, { backgroundColor: toolColor }]}>
-            <Text style={styles.toolEmoji}>{toolEmoji}</Text>
+          <View style={[styles.toolEmojiWrap, { backgroundColor: toolColor, overflow: 'hidden' }]}>
+            {toolEmoji && toolEmoji.startsWith('http') ? (
+              <Image source={{ uri: toolEmoji }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+            ) : (
+              <Text style={styles.toolEmoji}>{toolEmoji}</Text>
+            )}
           </View>
           <View style={styles.toolHeroInfo}>
             <View style={[styles.conditionPill, { backgroundColor: toolColor }]}>

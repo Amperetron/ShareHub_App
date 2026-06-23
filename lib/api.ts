@@ -38,6 +38,7 @@ export type ToolItem = {
   condition: string;
   description: string;
   coordinates: { latitude: number; longitude: number };
+  type?: 'offer' | 'request';
 };
 
 export type RideItem = {
@@ -262,6 +263,53 @@ export async function fetchTools(): Promise<ToolItem[]> {
         latitude: asNumber(tool.latitude, 12.9116),
         longitude: asNumber(tool.longitude, 77.6389),
       },
+      type: tool.type,
+    };
+  });
+}
+
+export async function fetchUserTools(): Promise<ToolItem[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+
+  const { data: tools, error } = await supabase
+    .from('tools')
+    .select('*')
+    .eq('owner_id', userId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  if (!tools?.length) return [];
+
+  const { data: owner } = await supabase.from('users').select('*').eq('id', userId).single();
+
+  return tools.map((tool) => {
+    const category = tool.category || 'Power Tools';
+    const style = CATEGORY_STYLE[category] ?? CATEGORY_STYLE['Power Tools'];
+    const distance = distanceLabel(tool.latitude, tool.longitude);
+
+    return {
+      id: tool.id,
+      ownerId: tool.owner_id,
+      name: tool.name,
+      brand: tool.brand ?? '',
+      category,
+      ownerName: owner?.full_name ?? 'Neighbor',
+      ownerAvatar: owner?.avatar_url ?? DEFAULT_AVATAR,
+      distance: distance.distance,
+      distanceNum: distance.distanceNum,
+      available: Boolean(tool.available),
+      rating: asNumber(owner?.rating, 0),
+      lends: asNumber(tool.lends_count, 0),
+      emoji: tool.emoji || style.emoji,
+      color: style.color,
+      accentColor: style.accentColor,
+      condition: tool.condition ?? 'Good',
+      description: tool.description ?? '',
+      coordinates: {
+        latitude: asNumber(tool.latitude, 12.9116),
+        longitude: asNumber(tool.longitude, 77.6389),
+      },
+      type: tool.type,
     };
   });
 }

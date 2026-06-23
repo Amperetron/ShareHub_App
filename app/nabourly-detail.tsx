@@ -244,8 +244,12 @@ export default function NabourlyDetailScreen() {
       >
         {/* Tool Card */}
         <View style={styles.toolCard}>
-          <View style={styles.toolEmojiWrap}>
-            <Text style={styles.toolEmoji}>{detail.toolEmoji}</Text>
+          <View style={[styles.toolEmojiWrap, { overflow: 'hidden' }]}>
+            {detail.toolEmoji && detail.toolEmoji.startsWith('http') ? (
+              <Image source={{ uri: detail.toolEmoji }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+            ) : (
+              <Text style={styles.toolEmoji}>{detail.toolEmoji || '🔧'}</Text>
+            )}
           </View>
           <View style={styles.toolInfo}>
             <Text style={styles.toolName}>{detail.toolName}</Text>

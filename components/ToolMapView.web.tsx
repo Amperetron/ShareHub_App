@@ -56,8 +56,12 @@ export default function ToolMapView({ filteredTools, selectedMapTool, setSelecte
                 if (tool.available) onRequestBorrow(tool);
               }}
             >
-              <View style={[styles.emojiWrap, { backgroundColor: tool.color }]}>
-                <Text style={styles.emoji}>{tool.emoji}</Text>
+              <View style={[styles.emojiWrap, { backgroundColor: tool.color, overflow: 'hidden' }]}>
+                {tool.emoji && tool.emoji.startsWith('http') ? (
+                  <Image source={{ uri: tool.emoji }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+                ) : (
+                  <Text style={styles.emoji}>{tool.emoji}</Text>
+                )}
               </View>
               <View style={styles.info}>
                 <Text style={styles.name}>{tool.name}</Text>

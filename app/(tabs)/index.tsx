@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import {
   useSharedValue,
   useAnimatedReaction,
@@ -71,6 +71,18 @@ function useCounterAnimation(target: number, delay: number = 0) {
     setDisplay(0);
   }, [sharedValue]);
 
+  useEffect(() => {
+    if (target > 0) {
+      sharedValue.value = withTiming(target, {
+        duration: 1600,
+        easing: Easing.out(Easing.cubic),
+      });
+    } else {
+      sharedValue.value = 0;
+      setDisplay(0);
+    }
+  }, [target, sharedValue]);
+
   return { display, trigger, reset };
 }
 
@@ -115,24 +127,26 @@ export default function HomeScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    let mounted = true;
+  useFocusEffect(
+    useCallback(() => {
+      let mounted = true;
 
-    loadHomeData()
-      .then(() => {
-        if (!mounted) return;
-      })
-      .catch((error) => {
-        Alert.alert('Could not load home data', JSON.stringify(error));
-      });
+      loadHomeData()
+        .then(() => {
+          if (!mounted) return;
+        })
+        .catch((error) => {
+          Alert.alert('Could not load home data', JSON.stringify(error));
+        });
 
-    return () => {
-      mounted = false;
-    };
-  }, [loadHomeData]);
+      return () => {
+        mounted = false;
+      };
+    }, [loadHomeData])
+  );
 
   // ─── Counter animation state ─────────────────────────────────────────────
-  const co2Counter = useCounterAnimation(Math.round(Number(impact?.carbon_saved ?? 0)), 0);
+  const co2Counter = useCounterAnimation(Math.round(Number(impact?.carbon_saved ?? profile?.carbon_saved ?? 0)), 0);
   const hasAnimatedRef = useRef(false);
 
   // Track bento section position and scroll offset

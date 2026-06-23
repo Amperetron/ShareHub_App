@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,9 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
@@ -112,18 +115,119 @@ export default function AccountSettingsScreen() {
     }
   };
 
-  const handleSaveAvatar = async () => {
-    const trimmed = avatarUrl.trim();
-    if (!trimmed) { Alert.alert('Validation', 'Enter a profile picture URL.'); return; }
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  const decodeBase64 = (base64: string): ArrayBuffer => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const bufferLength = base64.length * 0.75;
+    const len = base64.length;
+    let p = 0;
+    let j = 0;
+    if (base64[len - 1] === '=') {
+      p++;
+      if (base64[len - 2] === '=') p++;
+    }
+    const arrayBuffer = new ArrayBuffer(bufferLength - p);
+    const bytes = new Uint8Array(arrayBuffer);
+    for (let i = 0; i < len; i += 4) {
+      const encoded1 = chars.indexOf(base64[i]);
+      const encoded2 = chars.indexOf(base64[i + 1]);
+      const encoded3 = chars.indexOf(base64[i + 2]);
+      const encoded4 = chars.indexOf(base64[i + 3]);
+      const bytes1 = (encoded1 << 2) | (encoded2 >> 4);
+      const bytes2 = ((encoded2 & 15) << 4) | (encoded3 >> 2);
+      const bytes3 = ((encoded3 & 3) << 6) | (encoded4 & 63);
+      bytes[j++] = bytes1;
+      if (encoded3 !== -1 && base64[i + 2] !== '=') {
+        bytes[j++] = bytes2;
+      }
+      if (encoded4 !== -1 && base64[i + 3] !== '=') {
+        bytes[j++] = bytes3;
+      }
+    }
+    return arrayBuffer;
+  };
+
+  const handlePickImage = async () => {
+    try {
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permissionResult.granted) {
+        Alert.alert('Permission required', 'We need permission to access your library to upload a picture.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (result.canceled || !result.assets?.length) return;
+
+      setUploadingImage(true);
+      const uri = result.assets[0].uri;
+      
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: 'base64',
+      });
+      const arrayBuffer = decodeBase64(base64);
+      
+      const fileExt = uri.split('.').pop() || 'jpg';
+      const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
+      const filePath = `avatars/${fileName}`;
+
+      const { error } = await supabase.storage
+        .from('tools')
+        .upload(filePath, arrayBuffer, {
+          contentType: `image/${fileExt === 'png' ? 'png' : 'jpeg'}`,
+          upsert: true
+        });
+
+      if (error) {
+        throw error;
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('tools')
+        .getPublicUrl(filePath);
+
+      await handleSaveAvatar(urlData.publicUrl);
+    } catch (err: any) {
+      console.error(err);
+      Alert.alert('Upload failed', err.message || 'An error occurred during image upload.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleSaveAvatar = async (url: string) => {
     setSaving('avatar');
     try {
       const userId = (await supabase.auth.getUser()).data.user?.id;
       // @ts-expect-error
-      await supabase.from('users').update({ avatar_url: trimmed }).eq('id', userId);
-      await supabase.auth.updateUser({ data: { avatar_url: trimmed } });
+      await supabase.from('users').update({ avatar_url: url }).eq('id', userId);
+      await supabase.auth.updateUser({ data: { avatar_url: url } });
+      setAvatarUrl(url);
       Alert.alert('Saved', 'Profile picture updated.');
     } catch (error: any) {
       Alert.alert('Error', error?.message || 'Could not update avatar.');
+    } finally {
+      setSaving('');
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    setSaving('avatar');
+    try {
+      const userId = (await supabase.auth.getUser()).data.user?.id;
+      // @ts-expect-error
+      await supabase.from('users').update({ avatar_url: null }).eq('id', userId);
+      await supabase.auth.updateUser({ data: { avatar_url: null } });
+      setAvatarUrl('');
+      Alert.alert('Saved', 'Profile picture removed.');
+    } catch (error: any) {
+      Alert.alert('Error', error?.message || 'Could not remove profile picture.');
     } finally {
       setSaving('');
     }
@@ -273,24 +377,41 @@ export default function AccountSettingsScreen() {
 
             {/* Profile Picture */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Profile Picture URL</Text>
-              <TextInput
-                style={styles.input}
-                value={avatarUrl}
-                onChangeText={setAvatarUrl}
-                placeholder="https://example.com/avatar.jpg"
-                autoCapitalize="none"
-                keyboardType="url"
-              />
+              <Text style={styles.sectionTitle}>Profile Picture</Text>
+              <View style={styles.avatarContainer}>
+                {avatarUrl ? (
+                  <Image
+                    source={{ uri: avatarUrl }}
+                    style={styles.avatarPreview}
+                  />
+                ) : (
+                  <View style={[styles.avatarPreview, styles.avatarPlaceholder]}>
+                    <Text style={styles.avatarPlaceholderText}>No Image</Text>
+                  </View>
+                )}
+              </View>
               <Pressable
-                style={[styles.primaryBtn, saving === 'avatar' && { opacity: 0.6 }]}
-                onPress={handleSaveAvatar}
-                disabled={saving === 'avatar'}
+                style={[styles.primaryBtn, (uploadingImage || saving === 'avatar') && { opacity: 0.6 }]}
+                onPress={handlePickImage}
+                disabled={uploadingImage || saving === 'avatar'}
               >
-                <Text style={styles.primaryBtnText}>
-                  {saving === 'avatar' ? 'Saving...' : 'Save Picture'}
-                </Text>
+                {uploadingImage || saving === 'avatar' ? (
+                  <ActivityIndicator color={Colors.white} />
+                ) : (
+                  <Text style={styles.primaryBtnText}>
+                    {avatarUrl ? 'Change Profile Picture' : 'Upload Profile Picture'}
+                  </Text>
+                )}
               </Pressable>
+              {avatarUrl ? (
+                <Pressable
+                  style={[styles.removeBtn, saving === 'avatar' && { opacity: 0.6 }]}
+                  onPress={handleRemoveAvatar}
+                  disabled={saving === 'avatar'}
+                >
+                  <Text style={styles.removeBtnText}>Remove Profile Picture</Text>
+                </Pressable>
+              ) : null}
             </View>
 
             {/* Delete Account */}
@@ -353,4 +474,40 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#dc2626',
   },
   deleteBtnText: { color: '#dc2626', fontSize: FontSize.base, fontWeight: '600' },
+  avatarContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: Spacing.md,
+  },
+  avatarPreview: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: Colors.surfaceAlt,
+  },
+  avatarPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderStyle: 'dashed',
+  },
+  avatarPlaceholderText: {
+    color: Colors.muted,
+    fontSize: FontSize.base,
+    fontWeight: '500',
+  },
+  removeBtn: {
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.md,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#dc2626',
+    marginTop: Spacing.sm,
+  },
+  removeBtnText: {
+    color: '#dc2626',
+    fontSize: FontSize.base,
+    fontWeight: '600',
+  },
 });

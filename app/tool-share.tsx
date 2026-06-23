@@ -52,7 +52,7 @@ export default function ToolShareScreen() {
         if (mounted) setTools(rows);
       })
       .catch((error) => {
-        Alert.alert('Could not load tools', JSON.stringify(error));
+        Alert.alert('Could not load items', JSON.stringify(error));
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -116,7 +116,11 @@ export default function ToolShareScreen() {
     >
       {/* Tool Emoji Badge */}
       <View style={[styles.toolEmojiWrap, { backgroundColor: tool.color }]}>
-        <Text style={styles.toolEmoji}>{tool.emoji}</Text>
+        {tool.emoji && tool.emoji.startsWith('http') ? (
+          <Image source={{ uri: tool.emoji }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+        ) : (
+          <Text style={styles.toolEmoji}>{tool.emoji || '🔧'}</Text>
+        )}
         {!tool.available ? (
           <View style={styles.unavailablePill}>
             <Text style={styles.unavailablePillText}>Borrowed</Text>
@@ -217,7 +221,7 @@ export default function ToolShareScreen() {
             style={styles.searchInput}
             value={searchQuery}
             onChangeText={setSearchQuery}
-            placeholder="Search tools, brands, owners..."
+            placeholder="Search items, brands, owners..."
             placeholderTextColor="#9ca3af"
             returnKeyType="search"
           />
@@ -290,7 +294,7 @@ export default function ToolShareScreen() {
           {/* Results Label */}
           <View style={styles.resultsLabelWrap}>
             <Text style={styles.resultsLabel}>
-                {loading ? 'Loading tools...' : `${filteredTools.length} tool${filteredTools.length !== 1 ? 's' : ''} nearby`}
+                {loading ? 'Loading items...' : `${filteredTools.length} item${filteredTools.length !== 1 ? 's' : ''} nearby`}
               {selectedCategory !== 'All' ? ` · ${selectedCategory}` : ''}
             </Text>
             <Pressable
@@ -315,9 +319,9 @@ export default function ToolShareScreen() {
             ListEmptyComponent={
               <View style={styles.emptyState}>
                 <Text style={styles.emptyEmoji}>🔍</Text>
-                <Text style={styles.emptyTitle}>{loading ? 'Loading tools' : 'No tools found'}</Text>
+                <Text style={styles.emptyTitle}>{loading ? 'Loading items' : 'No items found'}</Text>
                 <Text style={styles.emptySubtitle}>
-                  {loading ? 'Fetching tools from Supabase' : 'Try a different category or search term'}
+                  {loading ? 'Fetching items from Supabase' : 'Try a different category or search term'}
                 </Text>
               </View>
             }
