@@ -173,27 +173,31 @@ auth.users.id
              ├── ride_locations.ride_id (1:many, live tracking)
              │       └── ride_locations.user_id (many:1)
              ├── events.organizer_id (1:many)
-            └── activity_feed.user_id (1:many)
+             │       └── event_attendees.event_id (1:many)
+             ├── event_attendees.user_id (many:1)
+             └── activity_feed.user_id (1:many)
 ```
 
 ---
 
 ## FK SUMMARY
 
-| table         | col          | ->       |
-| ------------- | ------------ | -------- |
-| user_impact   | user_id      | users.id |
-| tools         | owner_id     | users.id |
-| tool_requests | tool_id      | tools.id |
-| tool_requests | borrower_id  | users.id |
-| tool_requests | owner_id     | users.id |
-| rides         | driver_id    | users.id |
-| ride_bookings | ride_id      | rides.id |
-| ride_bookings | passenger_id | users.id |
-| ride_locations | ride_id     | rides.id |
-| ride_locations | user_id     | users.id |
-| events        | organizer_id | users.id |
-| activity_feed | user_id      | users.id |
+| table           | col          | ->       |
+| --------------- | ------------ | -------- |
+| user_impact     | user_id      | users.id |
+| tools           | owner_id     | users.id |
+| tool_requests   | tool_id      | tools.id |
+| tool_requests   | borrower_id  | users.id |
+| tool_requests   | owner_id     | users.id |
+| rides           | driver_id    | users.id |
+| ride_bookings   | ride_id      | rides.id |
+| ride_bookings   | passenger_id | users.id |
+| ride_locations  | ride_id      | rides.id |
+| ride_locations  | user_id      | users.id |
+| events          | organizer_id | users.id |
+| event_attendees | event_id     | events.id|
+| event_attendees | user_id      | users.id |
+| activity_feed   | user_id      | users.id |
 
 ---
 
